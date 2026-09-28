@@ -1,0 +1,36 @@
+# Core data
+numpy>=1.26
+pandas>=2.2
+scipy>=1.11
+
+# ML / NLP (classical, no LLMs)
+scikit-learn>=1.4
+
+# Configuration and validation
+PyYAML>=6.0
+pydantic>=2.6
+
+# Data acquisition (free sources)
+requests>=2.31
+yfinance>=0.2.40
+beautifulsoup4>=4.12
+lxml>=5.0
+
+# Document parsing
+pdfplumber>=0.11
+
+# Charts
+matplotlib>=3.8
+plotly>=5.20
+
+# Backend and UI (used in later phases)
+fastapi>=0.110
+uvicorn>=0.29
+streamlit>=1.33
+
+# Testing
+pytest>=8.0
+
+# Notebooks
+jupyter>=1.0
+ipykernel>=6.29

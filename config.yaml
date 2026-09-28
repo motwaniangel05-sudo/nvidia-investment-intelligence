@@ -1,0 +1,51 @@
+# ============================================================
+# Project configuration. Change company here to re-target the system.
+# ============================================================
+
+company:
+  name: "NVIDIA Corporation"
+  short_name: "NVIDIA"
+  ticker: "NVDA"
+  # SEC identifier (10-digit, zero-padded). Verified/used in Phase 2.
+  cik: "0001045810"
+  # NVIDIA's fiscal year ends late January (FY2025 ended Jan 26, 2025)
+  fiscal_year_end_month: 1
+
+data_period:
+  start_year: 2016
+  end_year: 2026
+
+competitors:
+  # Each competitor needs a stated reason (Market Agent must explain inclusion)
+  - name: "Advanced Micro Devices"
+    ticker: "AMD"
+    reason: "Direct GPU and data-center accelerator competitor"
+  - name: "Intel"
+    ticker: "INTC"
+    reason: "CPU and emerging AI accelerator competitor"
+  - name: "Broadcom"
+    ticker: "AVGO"
+    reason: "Custom AI accelerators (ASICs) and AI networking"
+
+paths:
+  data_raw: "data/raw"
+  data_processed: "data/processed"
+  data_financial: "data/financial"
+  data_market: "data/market"
+  data_news: "data/news"
+  data_documents: "data/documents"
+  knowledge_db: "data/knowledge.db"
+  models: "models"
+  reports: "outputs/reports"
+  charts: "outputs/charts"
+  agent_results: "outputs/agent_results"
+  logs: "logs"
+
+logging:
+  level: "INFO"        # DEBUG, INFO, WARNING, ERROR
+  file: "logs/app.log"
+
+sec:
+  # SEC requires a descriptive User-Agent with contact info (used in Phase 2).
+  # Replace with your real name and email.
+  user_agent: "Angel Motwani motwani.angel05@gmail.com"

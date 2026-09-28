@@ -1,0 +1,37 @@
+# Virtual environment
+.venv/
+venv/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Logs
+logs/*.log
+
+# Data (large / regenerable). Structure preserved via .gitkeep files
+data/raw/*
+data/processed/*
+data/financial/*
+data/market/*
+data/news/*
+data/documents/*
+data/knowledge.db
+!data/**/.gitkeep
+
+# Models and outputs (regenerable)
+models/checkpoints/*
+outputs/reports/*
+outputs/charts/*
+outputs/agent_results/*
+!models/**/.gitkeep
+!outputs/**/.gitkeep
+
+# OS / editor
+.DS_Store
+.vscode/
+
+# Secrets
+.env
