@@ -47,3 +47,6 @@ data/documents/*.htm
 # Chunked filing text (9MB+, fully regenerable via rag/chunker.py,
 # which itself depends on rag/parser.py and the downloaded documents)
 data/processed/chunks_*.csv
+
+# TF-IDF vector store (4.7MB, regenerable via rag/vector_store.py)
+models/embeddings/tfidf_store.pkl
