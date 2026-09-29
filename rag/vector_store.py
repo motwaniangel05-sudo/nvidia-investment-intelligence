@@ -42,6 +42,7 @@ STOP_WORDS = {
     "that", "the", "their", "this", "to", "was", "were", "will", "with",
     "we", "us", "these", "those", "which", "who", "may", "can", "could",
     "would", "should", "not", "no", "if", "than", "then", "also", "each",
+    "what", "when", "where", "why", "how", "does", "do", "did",
 }
 
 TOKEN_PATTERN = re.compile(r"[a-z]{2,}")  # words of 2+ letters, lowercase
