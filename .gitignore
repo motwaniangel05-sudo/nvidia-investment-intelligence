@@ -35,3 +35,5 @@ outputs/agent_results/*
 
 # Secrets
 .env
+# Large regenerable raw XBRL dump (rerun data_acquisition.xbrl_facts to recreate)
+data/raw/sec/companyfacts_*.json
