@@ -12,12 +12,19 @@ than scraping HTML tables. This module focuses on narrative text only
 """
 
 import re
+import warnings
 from pathlib import Path
 from typing import List
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
 from core.logger import get_logger
+
+# SEC filings are sometimes XHTML-strict; lxml's HTML parser handles them
+# fine but warns about it. We've verified extraction quality on real
+# filings (see tests/test_parser.py and Phase 3 manual checks), so this
+# specific warning is suppressed rather than left to clutter output.
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 log = get_logger(__name__)
 

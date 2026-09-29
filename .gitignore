@@ -43,3 +43,7 @@ data/raw/sec/companyfacts_*.json
 
 # Raw filing documents (69MB+, fully regenerable via document_downloader.py)
 data/documents/*.htm
+
+# Chunked filing text (9MB+, fully regenerable via rag/chunker.py,
+# which itself depends on rag/parser.py and the downloaded documents)
+data/processed/chunks_*.csv
