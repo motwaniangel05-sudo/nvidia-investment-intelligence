@@ -20,6 +20,9 @@ data/news/*
 data/documents/*
 data/knowledge.db
 !data/**/.gitkeep
+# Keep the processed, structured CSVs we actually generate as project outputs
+!data/financial/*.csv
+!data/market/*.csv
 
 # Models and outputs (regenerable)
 models/checkpoints/*
