@@ -49,3 +49,13 @@ sec:
   # SEC requires a descriptive User-Agent with contact info (used in Phase 2).
   # Replace with your real name and email.
   user_agent: "Angel Motwani motwani.angel05@gmail.com"
+
+
+acquisition:
+  # Politeness: SEC allows max 10 requests/second. We use well below that.
+  sec_min_seconds_between_requests: 0.25
+  http_timeout_seconds: 30
+  http_max_retries: 3
+  # Form types we care about
+  filing_forms: ["10-K", "10-Q", "8-K"]
+  manifest_file: "data/raw/manifest.csv"
