@@ -40,3 +40,6 @@ outputs/agent_results/*
 .env
 # Large regenerable raw XBRL dump (rerun data_acquisition.xbrl_facts to recreate)
 data/raw/sec/companyfacts_*.json
+
+# Raw filing documents (69MB+, fully regenerable via document_downloader.py)
+data/documents/*.htm
