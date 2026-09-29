@@ -164,6 +164,147 @@ def get_available_metrics() -> List[str]:
     return list(METRIC_CONCEPTS.keys())
 
 
+def calculate_yoy_growth(series: Dict[str, float]) -> Dict[str, float]:
+    """
+    Year-over-year % growth between consecutive periods in a series
+    (as returned by get_annual_series). Requires periods to be sorted
+    chronologically, which get_annual_series already guarantees.
+    """
+    periods = sorted(series.keys())
+    growth = {}
+    for i in range(1, len(periods)):
+        prev_period, curr_period = periods[i - 1], periods[i]
+        prev_val, curr_val = series[prev_period], series[curr_period]
+        if prev_val == 0:
+            log.warning("Skipping YoY growth for %s: prior period value is zero", curr_period)
+            continue
+        growth[curr_period] = ((curr_val - prev_val) / abs(prev_val)) * 100
+    return growth
+
+
+def calculate_cagr(series: Dict[str, float]) -> Optional[float]:
+    """
+    Compound Annual Growth Rate across the full span of the series:
+    CAGR = ((end/start)^(1/years) - 1) * 100
+    Returns None if fewer than 2 periods, or if the start value is not
+    positive (CAGR is undefined/misleading for negative or zero starts).
+    """
+    periods = sorted(series.keys())
+    if len(periods) < 2:
+        log.warning("Cannot compute CAGR: need at least 2 periods, got %d", len(periods))
+        return None
+
+    start_period, end_period = periods[0], periods[-1]
+    start_val, end_val = series[start_period], series[end_period]
+
+    if start_val <= 0:
+        log.warning("Cannot compute CAGR: start value is not positive (%s)", start_val)
+        return None
+
+    years = (_parse_date(end_period) - _parse_date(start_period)).days / 365.25
+    if years <= 0:
+        return None
+
+    cagr = ((end_val / start_val) ** (1 / years) - 1) * 100
+    return cagr
+
+
+def calculate_margins(company_ticker: str, start_year: int = None, end_year: int = None) -> Dict[str, Dict[str, float]]:
+    """
+    Gross/operating/net margin (%) per period, computed as metric/revenue.
+    A period only appears in a margin's results if BOTH revenue and that
+    metric are available for it -- no fabricated or interpolated values.
+    """
+    revenue = get_annual_series("revenue", company_ticker, start_year, end_year)
+    gross_profit = get_annual_series("gross_profit", company_ticker, start_year, end_year)
+    operating_income = get_annual_series("operating_income", company_ticker, start_year, end_year)
+    net_income = get_annual_series("net_income", company_ticker, start_year, end_year)
+
+    def margin_series(numerator: Dict[str, float]) -> Dict[str, float]:
+        result = {}
+        for period, rev in revenue.items():
+            if period not in numerator:
+                continue
+            if rev == 0:
+                log.warning("Skipping margin for %s: revenue is zero", period)
+                continue
+            result[period] = (numerator[period] / rev) * 100
+        return result
+
+    return {
+        "gross_margin": margin_series(gross_profit),
+        "operating_margin": margin_series(operating_income),
+        "net_margin": margin_series(net_income),
+    }
+
+
+def calculate_fcf(company_ticker: str, start_year: int = None, end_year: int = None) -> Dict[str, float]:
+    """
+    Free Cash Flow = Operating Cash Flow - CapEx, per period.
+    Only periods with BOTH values available are included.
+    Note: capex is stored as a positive "payment" amount in XBRL, so we
+    subtract it directly (not add a negative).
+    """
+    ocf = get_annual_series("operating_cash_flow", company_ticker, start_year, end_year)
+    capex = get_annual_series("capex", company_ticker, start_year, end_year)
+
+    fcf = {}
+    for period, ocf_val in ocf.items():
+        if period not in capex:
+            log.warning("Skipping FCF for %s: capex not available", period)
+            continue
+        fcf[period] = ocf_val - capex[period]
+    return fcf
+
+
+def calculate_roe_roa(company_ticker: str, start_year: int = None, end_year: int = None) -> Dict[str, Dict[str, float]]:
+    """
+    ROE = Net Income / Stockholders' Equity * 100
+    ROA = Net Income / Total Assets * 100
+    Both use point-in-time balance-sheet figures as of the SAME period_end
+    as the net_income figure (i.e. equity/assets at fiscal year-end,
+    matched to that year's income).
+    """
+    net_income = get_annual_series("net_income", company_ticker, start_year, end_year)
+    equity = get_annual_series("stockholders_equity", company_ticker, start_year, end_year)
+    assets = get_annual_series("assets", company_ticker, start_year, end_year)
+
+    roe, roa = {}, {}
+    for period, ni in net_income.items():
+        if period in equity and equity[period] != 0:
+            roe[period] = (ni / equity[period]) * 100
+        else:
+            log.warning("Skipping ROE for %s: equity unavailable or zero", period)
+
+        if period in assets and assets[period] != 0:
+            roa[period] = (ni / assets[period]) * 100
+        else:
+            log.warning("Skipping ROA for %s: assets unavailable or zero", period)
+
+    return {"roe": roe, "roa": roa}
+
+
+def build_financial_summary(company_ticker: str, start_year: int = None, end_year: int = None) -> Dict:
+    """
+    Full financial summary combining every calculation above. This is
+    the main entry point Phase 8's Financial Agent will call.
+    """
+    revenue = get_annual_series("revenue", company_ticker, start_year, end_year)
+    net_income = get_annual_series("net_income", company_ticker, start_year, end_year)
+
+    return {
+        "company_ticker": company_ticker,
+        "revenue": revenue,
+        "revenue_yoy_growth": calculate_yoy_growth(revenue),
+        "revenue_cagr": calculate_cagr(revenue),
+        "net_income": net_income,
+        "net_income_yoy_growth": calculate_yoy_growth(net_income),
+        "margins": calculate_margins(company_ticker, start_year, end_year),
+        "free_cash_flow": calculate_fcf(company_ticker, start_year, end_year),
+        "returns": calculate_roe_roa(company_ticker, start_year, end_year),
+    }
+
+
 if __name__ == "__main__":
     print("Testing get_annual_series() on real NVIDIA revenue data:\n")
     revenue = get_annual_series("revenue", "NVDA")
