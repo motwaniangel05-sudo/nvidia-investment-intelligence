@@ -104,12 +104,19 @@ def filter_by_year(df: pd.DataFrame, start_year: int, end_year: int) -> pd.DataF
     return df[mask].reset_index(drop=True)
 
 
-def build_xbrl_facts() -> pd.DataFrame:
-    """Main entry: fetch, flatten, filter, save, record in manifest."""
+def build_xbrl_facts_for(ticker: str, cik: str, expected_name_fragment: str = None) -> pd.DataFrame:
+    """
+    Fetch, flatten, filter, save, and record XBRL facts for ANY company
+    given its ticker and CIK -- not limited to the primary target company.
+    Used for both config['company'] (via build_xbrl_facts()) and each
+    entry in config['competitors'] (Phase 9 extension).
+
+    expected_name_fragment: if given, verifies the CIK's entity name
+    contains this substring (case-insensitive), same safety check as the
+    original NVIDIA-only version. If None, the check is skipped (used
+    when the caller has no easy short-name string, e.g. from a loop).
+    """
     config = load_config()
-    company = config["company"]
-    ticker = company["ticker"]
-    cik = company["cik"]
     period = config["data_period"]
 
     client = SecClient(config)
@@ -118,12 +125,11 @@ def build_xbrl_facts() -> pd.DataFrame:
     facts_json = fetch_company_facts(client, cik)
 
     sec_name = facts_json.get("entityName", "")
-    log.info("XBRL facts entity name: %s", sec_name)
-    expected = company["short_name"].lower()
-    if expected not in sec_name.lower():
+    log.info("XBRL facts entity name for %s: %s", ticker, sec_name)
+    if expected_name_fragment and expected_name_fragment.lower() not in sec_name.lower():
         raise ValueError(
             f"CIK {cik} XBRL facts belong to '{sec_name}', which does not "
-            f"match '{company['short_name']}'. Check config.yaml company.cik."
+            f"match expected '{expected_name_fragment}'. Check config.yaml."
         )
 
     # Save raw JSON as evidence of exactly what SEC returned
@@ -146,8 +152,8 @@ def build_xbrl_facts() -> pd.DataFrame:
     missing_concepts = [c for c in CONCEPTS_OF_INTEREST if c not in available_concepts]
     if missing_concepts:
         log.warning(
-            "These requested concepts were not found for this company: %s",
-            missing_concepts,
+            "These requested concepts were not found for %s: %s",
+            ticker, missing_concepts,
         )
 
     out_dir = get_path(config, "data_financial")
@@ -157,6 +163,49 @@ def build_xbrl_facts() -> pd.DataFrame:
     log.info("Saved XBRL facts: %s (%d rows, %d concepts)",
               out_file, len(df), len(available_concepts))
     return df
+
+
+def build_xbrl_facts() -> pd.DataFrame:
+    """Original entry point: fetch XBRL facts for the primary target company
+    (config['company']), with the strict name-match safety check."""
+    config = load_config()
+    company = config["company"]
+    return build_xbrl_facts_for(
+        ticker=company["ticker"],
+        cik=company["cik"],
+        expected_name_fragment=company["short_name"],
+    )
+
+
+def build_xbrl_facts_all_companies() -> dict:
+    """
+    Fetch XBRL facts for the primary company AND every configured
+    competitor. Returns {ticker: DataFrame}. A failure for one competitor
+    (e.g. missing CIK) is logged and skipped, not fatal to the others.
+    """
+    config = load_config()
+    results = {}
+
+    company = config["company"]
+    log.info("Fetching XBRL facts for target company: %s", company["ticker"])
+    results[company["ticker"]] = build_xbrl_facts_for(
+        ticker=company["ticker"], cik=company["cik"],
+        expected_name_fragment=company["short_name"],
+    )
+
+    for comp in config.get("competitors", []):
+        ticker = comp["ticker"]
+        cik = comp.get("cik")
+        if not cik:
+            log.warning("Skipping %s: no CIK configured in config.yaml", ticker)
+            continue
+        log.info("Fetching XBRL facts for competitor: %s", ticker)
+        try:
+            results[ticker] = build_xbrl_facts_for(ticker=ticker, cik=cik)
+        except Exception as e:
+            log.error("Failed to fetch XBRL facts for %s: %s", ticker, e)
+
+    return results
 
 
 if __name__ == "__main__":

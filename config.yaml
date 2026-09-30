@@ -17,14 +17,18 @@ data_period:
 
 competitors:
   # Each competitor needs a stated reason (Market Agent must explain inclusion)
+  # CIKs verified against SEC's company_tickers.json (Phase 9 extension)
   - name: "Advanced Micro Devices"
     ticker: "AMD"
+    cik: "0000002488"
     reason: "Direct GPU and data-center accelerator competitor"
   - name: "Intel"
     ticker: "INTC"
+    cik: "0000050863"
     reason: "CPU and emerging AI accelerator competitor"
   - name: "Broadcom"
     ticker: "AVGO"
+    cik: "0001730168"
     reason: "Custom AI accelerators (ASICs) and AI networking"
 
 paths:
