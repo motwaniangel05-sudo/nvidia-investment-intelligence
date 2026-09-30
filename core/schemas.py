@@ -133,3 +133,36 @@ if __name__ == "__main__":
     print("Schema initialized. Current row counts:")
     for table, count in table_counts().items():
         print(f"  {table}: {count}")
+
+
+# ============================================================
+# Agent result structures (Phase 7+). These are NOT database
+# tables -- agent outputs are transient/in-memory for now. If a
+# later phase needs to persist them (e.g. for caching or audit),
+# a dedicated table will be added then, based on real requirements.
+# ============================================================
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class Finding:
+    """One evidence-backed claim produced by an agent."""
+    claim: str
+    evidence_text: str
+    source_chunk_id: str
+    source_form: str
+    source_filing_date: str
+    confidence: float  # 0.0 to 1.0, based on retrieval score
+
+
+@dataclass
+class AgentResult:
+    """Standardized output every agent returns (per master prompt Section 10)."""
+    agent_name: str
+    task: str
+    findings: List[Finding] = field(default_factory=list)
+    metrics: Dict[str, Any] = field(default_factory=dict)
+    warnings: List[str] = field(default_factory=list)
+    status: str = "success"  # "success" | "partial" | "failed"
