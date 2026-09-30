@@ -41,13 +41,17 @@ def already_downloaded(manifest: Manifest, source_url: str) -> bool:
     return manifest.find_by_url(source_url) is not None
 
 
-def download_filing_documents() -> pd.DataFrame:
+def download_filing_documents(forms: List[str] = None) -> pd.DataFrame:
     """
-    Main entry: read the filings index, download each 10-K/10-Q document
-    not already downloaded, save it, and record it in the manifest.
+    Main entry: read the filings index, download each document of the
+    given form type(s) not already downloaded, save it, and record it in
+    the manifest. Defaults to DOWNLOADABLE_FORMS (10-K/10-Q) if forms is
+    not given, preserving original behavior for existing callers.
 
     Returns a DataFrame summarizing what was downloaded/skipped/failed.
     """
+    forms = forms if forms is not None else DOWNLOADABLE_FORMS
+
     config = load_config()
     ticker = config["company"]["ticker"]
 
@@ -59,7 +63,7 @@ def download_filing_documents() -> pd.DataFrame:
         )
 
     filings = pd.read_csv(index_path)
-    filings = filings[filings["form"].isin(DOWNLOADABLE_FORMS)].copy()
+    filings = filings[filings["form"].isin(forms)].copy()
 
     if filings.empty:
         log.warning("No 10-K/10-Q filings found in the index to download.")

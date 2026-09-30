@@ -167,11 +167,19 @@ def chunk_document(
     return chunks
 
 
-def build_all_chunks() -> pd.DataFrame:
+def build_all_chunks(forms: List[str] = None, output_suffix: str = "") -> pd.DataFrame:
     """
-    Main entry: chunk every downloaded 10-K/10-Q document, combine into
-    one DataFrame, save to data/processed/chunks_{TICKER}.csv.
+    Main entry: chunk every downloaded document of the given form type(s),
+    combine into one DataFrame, save to
+    data/processed/chunks_{TICKER}{output_suffix}.csv.
+
+    Defaults to ["10-K", "10-Q"] if forms is not given, preserving
+    original behavior. output_suffix lets callers keep 8-K chunks in a
+    separate file (e.g. "_8K") rather than overwriting the primary
+    10-K/10-Q chunk file used by Phase 5's RAG index.
     """
+    forms = forms if forms is not None else ["10-K", "10-Q"]
+
     config = load_config()
     ticker = config["company"]["ticker"]
 
@@ -182,7 +190,7 @@ def build_all_chunks() -> pd.DataFrame:
         )
 
     filings = pd.read_csv(index_path)
-    filings = filings[filings["form"].isin(["10-K", "10-Q"])]
+    filings = filings[filings["form"].isin(forms)]
 
     docs_dir = get_path(config, "data_documents")
     all_chunks: List[Chunk] = []
@@ -216,7 +224,7 @@ def build_all_chunks() -> pd.DataFrame:
 
     out_dir = get_path(config, "data_processed")
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / f"chunks_{ticker}.csv"
+    out_file = out_dir / f"chunks_{ticker}{output_suffix}.csv"
     df.to_csv(out_file, index=False)
     log.info("Saved %d chunks from %d documents to %s",
               len(df), len(filings) - len(skipped), out_file)

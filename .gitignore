@@ -47,6 +47,9 @@ data/documents/*.htm
 # Chunked filing text (9MB+, fully regenerable via rag/chunker.py,
 # which itself depends on rag/parser.py and the downloaded documents)
 data/processed/chunks_*.csv
+# Exception: the much smaller 8-K chunk file is committed directly --
+# useful as reference/training data for the News Agent's classifier (Phase 10)
+!data/processed/chunks_*_8K.csv
 
 # TF-IDF vector store (4.7MB, regenerable via rag/vector_store.py)
 models/embeddings/tfidf_store.pkl
