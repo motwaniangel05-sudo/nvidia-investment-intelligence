@@ -81,11 +81,11 @@ def _accession_from_source_file(source_file: str) -> str:
     return parts[2] if len(parts) > 2 else ""
 
 
-def load_metrics(conn, config: dict) -> int:
-    ticker = config["company"]["ticker"]
+def _load_metrics_for_ticker(conn, ticker: str, config: dict) -> int:
+    """Load one ticker's XBRL facts CSV into the metrics table, if present."""
     path = get_path(config, "data_financial") / f"xbrl_facts_{ticker}.csv"
     if not path.exists():
-        log.warning("No XBRL facts file found at %s; skipping metrics load", path)
+        log.warning("No XBRL facts file found at %s; skipping metrics load for %s", path, ticker)
         return 0
 
     df = pd.read_csv(path)
@@ -106,6 +106,25 @@ def load_metrics(conn, config: dict) -> int:
         rows += 1
     conn.commit()
     return rows
+
+
+def load_metrics(conn, config: dict) -> int:
+    """
+    Load XBRL metrics for the primary target company AND every configured
+    competitor that has a CIK set (Phase 9 extension). Returns the total
+    row count across all companies loaded.
+    """
+    total = 0
+    ticker = config["company"]["ticker"]
+    total += _load_metrics_for_ticker(conn, ticker, config)
+
+    for comp in config.get("competitors", []):
+        comp_ticker = comp["ticker"]
+        if not comp.get("cik"):
+            continue  # no CIK configured -- xbrl data was never fetched
+        total += _load_metrics_for_ticker(conn, comp_ticker, config)
+
+    return total
 
 
 def load_prices(conn, config: dict) -> int:
