@@ -244,6 +244,17 @@ def calculate_fcf(company_ticker: str, start_year: int = None, end_year: int = N
     Only periods with BOTH values available are included.
     Note: capex is stored as a positive "payment" amount in XBRL, so we
     subtract it directly (not add a negative).
+
+    KNOWN LIMITATION (verified during Phase 6 testing against real NVDA
+    data): NVIDIA's XBRL filings tag PaymentsToAcquirePropertyPlantAndEquipment
+    only in 10-Q filings, as year-to-date cumulative figures through Q1/Q2/Q3
+    (max ~272 days). No filing tags a full ~365-day annual figure under this
+    concept, so get_annual_series() correctly finds no qualifying annual
+    periods and this function returns an empty dict for NVDA. This is a
+    genuine gap in the source data, not a bug -- per project policy, we do
+    not estimate or fabricate the missing annual figure. Downstream callers
+    (e.g. the Valuation Agent's DCF) must handle an empty FCF series
+    explicitly rather than assume data will be present.
     """
     ocf = get_annual_series("operating_cash_flow", company_ticker, start_year, end_year)
     capex = get_annual_series("capex", company_ticker, start_year, end_year)
