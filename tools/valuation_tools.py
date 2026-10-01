@@ -288,6 +288,79 @@ def calculate_pe_ratio(company_ticker: str) -> Optional[Dict]:
     }
 
 
+def calculate_ev_ebit(company_ticker: str) -> Optional[Dict]:
+    """
+    Enterprise Value / EBIT (substitute for EV/EBITDA).
+
+    HONEST LIMITATION: true EBITDA requires Depreciation & Amortization,
+    which was not collected in this project's XBRL concept list (see
+    Phase 2 CONCEPTS_OF_INTEREST). Rather than fabricate a D&A estimate,
+    this function uses EBIT (Operating Income) directly -- a legitimate,
+    commonly-used multiple in its own right, clearly distinguished from
+    EV/EBITDA, not presented as equivalent to it.
+
+    Enterprise Value here = market cap (price x diluted shares implied
+    from EPS/NetIncome) + total debt - cash. Shares outstanding are
+    APPROXIMATED as NetIncome / EPS_diluted (we did not separately
+    collect a shares-outstanding concept) -- this approximation is
+    disclosed in the output.
+    """
+    operating_income = get_annual_series("operating_income", company_ticker)
+    net_income = get_annual_series("net_income", company_ticker)
+    eps_diluted = get_annual_series("eps_diluted", company_ticker)
+    debt = get_annual_series("long_term_debt", company_ticker)
+    cash = get_annual_series("cash", company_ticker)
+
+    if not operating_income or not net_income or not eps_diluted:
+        return None
+
+    latest_period = max(operating_income.keys())
+    if latest_period not in net_income or latest_period not in eps_diluted:
+        return None
+    if eps_diluted[latest_period] == 0:
+        return None
+
+    implied_shares = net_income[latest_period] / eps_diluted[latest_period]
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT date, close FROM prices WHERE company_ticker = ? "
+            "ORDER BY date DESC LIMIT 1", (company_ticker,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return None
+
+    market_cap = row["close"] * implied_shares
+    latest_debt = debt.get(latest_period, 0.0)
+    latest_cash = cash.get(latest_period, 0.0)
+    enterprise_value = market_cap + latest_debt - latest_cash
+
+    ebit = operating_income[latest_period]
+    if ebit <= 0:
+        return None
+
+    return {
+        "ebit": ebit,
+        "ebit_period": latest_period,
+        "market_cap": market_cap,
+        "implied_shares_outstanding": implied_shares,
+        "total_debt": latest_debt,
+        "cash": latest_cash,
+        "enterprise_value": enterprise_value,
+        "ev_ebit_ratio": enterprise_value / ebit,
+        "note": (
+            "This is EV/EBIT, not EV/EBITDA -- D&A data was not collected "
+            "in this project (see Phase 2 scope). Shares outstanding is "
+            "APPROXIMATED as NetIncome/EPS_diluted, not a directly "
+            "reported figure."
+        ),
+    }
+
+
 if __name__ == "__main__":
     print()
     print("=== Growth Scenarios DCF (WACC=11%, Terminal Growth=3%) ===")

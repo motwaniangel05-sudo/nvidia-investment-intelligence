@@ -1,10 +1,11 @@
 """Tests for valuation engine: revenue forecast, FCF proxy, DCF math."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from tools.valuation_tools import (
+    calculate_ev_ebit,
     calculate_fcf_proxy_margin,
     forecast_revenue,
     run_dcf,
@@ -144,3 +145,90 @@ def test_run_dcf_enterprise_value_is_sum_of_pv_plus_pv_terminal():
 
     expected = result["sum_pv_explicit_period"] + result["pv_terminal_value"]
     assert result["enterprise_value"] == pytest.approx(expected)
+
+
+def test_calculate_ev_ebit_computes_correctly():
+    fake_op_income = {"2024-01-28": 100.0}
+    fake_net_income = {"2024-01-28": 80.0}
+    fake_eps = {"2024-01-28": 2.0}  # implies 80/2 = 40 shares
+    fake_debt = {"2024-01-28": 50.0}
+    fake_cash = {"2024-01-28": 30.0}
+
+    def fake_series(metric, ticker, start_year=None, end_year=None):
+        return {
+            "operating_income": fake_op_income,
+            "net_income": fake_net_income,
+            "eps_diluted": fake_eps,
+            "long_term_debt": fake_debt,
+            "cash": fake_cash,
+        }[metric]
+
+    fake_conn = MagicMock()
+    fake_conn.execute.return_value.fetchone.return_value = {"date": "2024-01-28", "close": 10.0}
+
+    with patch("tools.valuation_tools.get_annual_series", side_effect=fake_series), \
+         patch("tools.valuation_tools.get_connection", return_value=fake_conn):
+        result = calculate_ev_ebit("NVDA")
+
+    # market_cap = 10.0 * 40 shares = 400
+    # EV = 400 + 50 debt - 30 cash = 420
+    # EV/EBIT = 420 / 100 = 4.2
+    assert result["implied_shares_outstanding"] == pytest.approx(40.0)
+    assert result["market_cap"] == pytest.approx(400.0)
+    assert result["enterprise_value"] == pytest.approx(420.0)
+    assert result["ev_ebit_ratio"] == pytest.approx(4.2)
+
+
+def test_calculate_ev_ebit_returns_none_with_missing_data():
+    with patch("tools.valuation_tools.get_annual_series", return_value={}):
+        result = calculate_ev_ebit("NVDA")
+    assert result is None
+
+
+def test_calculate_ev_ebit_returns_none_for_nonpositive_ebit():
+    fake_op_income = {"2024-01-28": -50.0}  # negative EBIT
+    fake_net_income = {"2024-01-28": 80.0}
+    fake_eps = {"2024-01-28": 2.0}
+
+    def fake_series(metric, ticker, start_year=None, end_year=None):
+        return {
+            "operating_income": fake_op_income,
+            "net_income": fake_net_income,
+            "eps_diluted": fake_eps,
+            "long_term_debt": {},
+            "cash": {},
+        }[metric]
+
+    fake_conn = MagicMock()
+    fake_conn.execute.return_value.fetchone.return_value = {"date": "2024-01-28", "close": 10.0}
+
+    with patch("tools.valuation_tools.get_annual_series", side_effect=fake_series), \
+         patch("tools.valuation_tools.get_connection", return_value=fake_conn):
+        result = calculate_ev_ebit("NVDA")
+
+    assert result is None
+
+
+def test_calculate_ev_ebit_note_clarifies_not_ebitda():
+    fake_op_income = {"2024-01-28": 100.0}
+    fake_net_income = {"2024-01-28": 80.0}
+    fake_eps = {"2024-01-28": 2.0}
+
+    def fake_series(metric, ticker, start_year=None, end_year=None):
+        return {
+            "operating_income": fake_op_income,
+            "net_income": fake_net_income,
+            "eps_diluted": fake_eps,
+            "long_term_debt": {},
+            "cash": {},
+        }[metric]
+
+    fake_conn = MagicMock()
+    fake_conn.execute.return_value.fetchone.return_value = {"date": "2024-01-28", "close": 10.0}
+
+    with patch("tools.valuation_tools.get_annual_series", side_effect=fake_series), \
+         patch("tools.valuation_tools.get_connection", return_value=fake_conn):
+        result = calculate_ev_ebit("NVDA")
+
+    assert "EBITDA" in result["note"]
+    assert "APPROXIMATED" in result["note"]
