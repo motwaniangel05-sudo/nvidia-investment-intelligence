@@ -169,20 +169,165 @@ def run_dcf(
     }
 
 
+# Named growth scenarios -- explicit, reasoned alternatives to naive
+# historical CAGR extrapolation (see Phase 12 Part 1 finding: NVIDIA's
+# full historical CAGR of ~45.8% produces an implausible $4.8T DCF
+# output when extrapolated 5 years forward). These are ANALYST
+# ASSUMPTIONS, not derived from data -- stated explicitly as such.
+GROWTH_SCENARIOS = {
+    "conservative": 0.10,
+    "moderate": 0.20,
+    "aggressive": 0.35,
+    "historical_cagr": None,  # computed from data; flagged as likely unrealistic as a base case
+}
+
+
+def run_dcf_scenarios(
+    company_ticker: str,
+    wacc: float = 0.11,
+    terminal_growth: float = 0.03,
+    forecast_years: int = DEFAULT_FORECAST_YEARS,
+) -> Dict[str, Dict]:
+    """
+    Run the DCF under each named growth scenario in GROWTH_SCENARIOS,
+    so the output shows a RANGE of outcomes under different explicit
+    assumptions rather than one potentially indefensible point estimate.
+    """
+    results = {}
+    for name, rate in GROWTH_SCENARIOS.items():
+        try:
+            dcf = run_dcf(
+                company_ticker, wacc=wacc, terminal_growth=terminal_growth,
+                forecast_years=forecast_years, revenue_growth_rate=rate,
+            )
+            dcf["scenario_name"] = name
+            dcf["scenario_is_historical_extrapolation"] = (name == "historical_cagr")
+            results[name] = dcf
+        except ValueError as e:
+            log.warning("Scenario '%s' failed for %s: %s", name, company_ticker, e)
+    return results
+
+
+def sensitivity_analysis(
+    company_ticker: str,
+    growth_rate: float,
+    wacc_range: List[float] = None,
+    terminal_growth_range: List[float] = None,
+    forecast_years: int = DEFAULT_FORECAST_YEARS,
+) -> Dict[str, Dict[str, float]]:
+    """
+    WACC x Terminal Growth sensitivity grid (per project spec requirement).
+    Returns {wacc_label: {terminal_growth_label: enterprise_value}}.
+    Combinations where wacc <= terminal_growth are skipped (mathematically
+    invalid for Gordon Growth) and recorded as None, not silently omitted.
+    """
+    wacc_range = wacc_range or DEFAULT_WACC_RANGE
+    terminal_growth_range = terminal_growth_range or DEFAULT_TERMINAL_GROWTH_RANGE
+
+    grid = {}
+    for wacc in wacc_range:
+        wacc_label = f"{wacc:.1%}"
+        grid[wacc_label] = {}
+        for tg in terminal_growth_range:
+            tg_label = f"{tg:.1%}"
+            if wacc <= tg:
+                grid[wacc_label][tg_label] = None
+                continue
+            try:
+                dcf = run_dcf(
+                    company_ticker, wacc=wacc, terminal_growth=tg,
+                    forecast_years=forecast_years, revenue_growth_rate=growth_rate,
+                )
+                grid[wacc_label][tg_label] = dcf["enterprise_value"]
+            except ValueError:
+                grid[wacc_label][tg_label] = None
+
+    return grid
+
+
+def calculate_pe_ratio(company_ticker: str) -> Optional[Dict]:
+    """
+    Price / Earnings using the most recent available market close price
+    and most recent diluted EPS from metrics. Returns None if either is
+    unavailable, rather than fabricating a ratio.
+    """
+    eps_series = get_annual_series("eps_diluted", company_ticker)
+    if not eps_series:
+        return None
+
+    latest_period = max(eps_series.keys())
+    latest_eps = eps_series[latest_period]
+    if latest_eps <= 0:
+        log.warning("Latest EPS for %s is non-positive (%s); P/E is not meaningful", company_ticker, latest_eps)
+        return None
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT date, close FROM prices WHERE company_ticker = ? "
+            "ORDER BY date DESC LIMIT 1", (company_ticker,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return None
+
+    pe_ratio = row["close"] / latest_eps
+    return {
+        "price": row["close"],
+        "price_date": row["date"],
+        "eps": latest_eps,
+        "eps_period": latest_period,
+        "pe_ratio": pe_ratio,
+        "note": (
+            "P/E compares the LATEST market price to the MOST RECENT annual "
+            "diluted EPS, which may not be perfectly period-matched (price "
+            "date and EPS fiscal-year-end date can differ by months)."
+        ),
+    }
+
+
 if __name__ == "__main__":
-    print("=== Revenue Forecast (NVDA, historical CAGR) ===")
-    forecast = forecast_revenue("NVDA")
-    for period, value in forecast.items():
-        print(f"  {period}: ${value:,.0f}")
+    print()
+    print("=== Growth Scenarios DCF (WACC=11%, Terminal Growth=3%) ===")
+    scenarios = run_dcf_scenarios("NVDA")
+    for name, result in scenarios.items():
+        flag = ""
+        if result["scenario_is_historical_extrapolation"]:
+            flag = " [LIKELY UNREALISTIC AS BASE CASE]"
+        rate = result["assumptions"]["revenue_growth_rate_used"]
+        ev = result["enterprise_value"]
+        print()
+        print(f"  Scenario: {name}{flag}")
+        print(f"    Growth rate used: {rate}")
+        print(f"    Enterprise Value: ${ev:,.0f}")
 
-    print("\n=== FCF Proxy Margin ===")
-    margin = calculate_fcf_proxy_margin("NVDA")
-    print(f"  Average OCF/Revenue margin: {margin:.1%}" if margin else "  Unavailable")
+    print()
+    print()
+    print("=== Sensitivity Analysis (growth=20% moderate scenario) ===")
+    grid = sensitivity_analysis("NVDA", growth_rate=0.20)
+    tg_labels = list(next(iter(grid.values())).keys())
+    header = "WACC \\ Terminal Growth: " + "  ".join(f"{t:>10}" for t in tg_labels)
+    print(header)
+    for wacc_label, row in grid.items():
+        formatted = []
+        for tg_label in tg_labels:
+            val = row[tg_label]
+            if val is not None:
+                formatted.append(f"{val/1e9:>9.0f}B")
+            else:
+                formatted.append(f"{'N/A':>10}")
+        print(f"{wacc_label:>6}            " + "  ".join(formatted))
 
-    print("\n=== Base Case DCF (WACC=11%, Terminal Growth=3%) ===")
-    dcf = run_dcf("NVDA", wacc=0.11, terminal_growth=0.03)
-    print(f"  {dcf['fcf_disclaimer']}\n")
-    print(f"  Sum of PV (explicit period): ${dcf['sum_pv_explicit_period']:,.0f}")
-    print(f"  Terminal Value: ${dcf['terminal_value']:,.0f}")
-    print(f"  PV of Terminal Value: ${dcf['pv_terminal_value']:,.0f}")
-    print(f"  Enterprise Value: ${dcf['enterprise_value']:,.0f}")
+    print()
+    print()
+    print("=== P/E Ratio ===")
+    pe = calculate_pe_ratio("NVDA")
+    if pe:
+        print(f"  Price ({pe['price_date']}): ${pe['price']:.2f}")
+        print(f"  Diluted EPS ({pe['eps_period']}): ${pe['eps']:.2f}")
+        print(f"  P/E Ratio: {pe['pe_ratio']:.1f}x")
+        print(f"  Note: {pe['note']}")
+    else:
+        print("  P/E unavailable (missing EPS or price data)")
