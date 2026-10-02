@@ -9,13 +9,23 @@ def fake_scenarios():
     return {
         "conservative": {
             "enterprise_value": 1_000_000_000_000.0,
-            "assumptions": {"revenue_growth_rate_used": 0.10},
+            "sum_pv_explicit_period": 400_000_000_000.0,
+            "pv_terminal_value": 600_000_000_000.0,
+            "assumptions": {
+                "revenue_growth_rate_used": 0.10,
+                "wacc": 0.11, "terminal_growth": 0.03,
+            },
             "fcf_disclaimer": "FCF proxy disclaimer text.",
             "scenario_is_historical_extrapolation": False,
         },
         "historical_cagr": {
             "enterprise_value": 4_800_000_000_000.0,
-            "assumptions": {"revenue_growth_rate_used": None},
+            "sum_pv_explicit_period": 1_000_000_000_000.0,
+            "pv_terminal_value": 3_800_000_000_000.0,
+            "assumptions": {
+                "revenue_growth_rate_used": None,
+                "wacc": 0.11, "terminal_growth": 0.03,
+            },
             "fcf_disclaimer": "FCF proxy disclaimer text.",
             "scenario_is_historical_extrapolation": True,
         },
@@ -33,6 +43,11 @@ def fake_pe():
 def fake_ev_ebit():
     return {
         "ev_ebit_ratio": 35.2, "ebit_period": "2026-01-25",
+        "ebit": 50_000_000_000.0,
+        "enterprise_value": 1_760_000_000_000.0,
+        "market_cap": 1_750_000_000_000.0,
+        "total_debt": 20_000_000_000.0,
+        "cash": 10_000_000_000.0,
         "note": "EV/EBIT note, mentions EBITDA and APPROXIMATED.",
     }
 

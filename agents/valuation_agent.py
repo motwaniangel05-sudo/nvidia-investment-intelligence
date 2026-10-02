@@ -36,13 +36,26 @@ class ValuationAgent(BaseAgent):
         for name, result in scenarios.items():
             is_historical = result.get("scenario_is_historical_extrapolation", False)
             flag = " (historical-CAGR extrapolation -- likely unrealistic as a base case)" if is_historical else ""
+            ev = result["enterprise_value"]
+            sum_pv = result["sum_pv_explicit_period"]
+            pv_tv = result["pv_terminal_value"]
+            growth_used = result["assumptions"]["revenue_growth_rate_used"]
+            evidence = (
+                f"{result['fcf_disclaimer']} "
+                f"Sum of PV (explicit period) = ${sum_pv:,.0f}; "
+                f"PV of Terminal Value = ${pv_tv:,.0f}; "
+                f"Enterprise Value = {sum_pv:,.0f} + {pv_tv:,.0f} = ${ev:,.0f}. "
+                f"WACC={result['assumptions']['wacc']}, "
+                f"Terminal Growth={result['assumptions']['terminal_growth']}, "
+                f"Revenue growth rate assumption={growth_used}."
+            )
             findings.append(Finding(
                 claim=(
                     f"DCF scenario '{name}'{flag}: Enterprise Value = "
-                    f"${result['enterprise_value']:,.0f} "
-                    f"(growth rate used: {result['assumptions']['revenue_growth_rate_used']})."
+                    f"${ev:,.0f} "
+                    f"(growth rate used: {growth_used})."
                 ),
-                evidence_text=result["fcf_disclaimer"],
+                evidence_text=evidence,
                 source_chunk_id=f"{self.company_ticker}_dcf_{name}",
                 source_form="DCF_model",
                 source_filing_date="n/a",
@@ -51,9 +64,15 @@ class ValuationAgent(BaseAgent):
 
         pe = calculate_pe_ratio(self.company_ticker)
         if pe:
+            pe_evidence = (
+                f"Price (${pe['price_date']}) = ${pe['price']:.2f}. "
+                f"Diluted EPS ({pe['eps_period']}) = ${pe['eps']:.2f}. "
+                f"P/E = {pe['price']:.2f} / {pe['eps']:.2f} = {pe['pe_ratio']:.1f}x. "
+                f"{pe['note']}"
+            )
             findings.append(Finding(
                 claim=f"{self.company_ticker} P/E ratio: {pe['pe_ratio']:.1f}x (price ${pe['price']:.2f} / EPS ${pe['eps']:.2f}).",
-                evidence_text=pe["note"],
+                evidence_text=pe_evidence,
                 source_chunk_id=f"{self.company_ticker}_pe_ratio",
                 source_form="market_data",
                 source_filing_date=pe["price_date"],
@@ -64,9 +83,17 @@ class ValuationAgent(BaseAgent):
 
         ev_ebit = calculate_ev_ebit(self.company_ticker)
         if ev_ebit:
+            ev_evidence = (
+                f"EBIT ({ev_ebit['ebit_period']}) = ${ev_ebit['ebit']:,.0f}. "
+                f"Enterprise Value = ${ev_ebit['enterprise_value']:,.0f} "
+                f"(Market Cap ${ev_ebit['market_cap']:,.0f} + Debt ${ev_ebit['total_debt']:,.0f} "
+                f"- Cash ${ev_ebit['cash']:,.0f}). "
+                f"EV/EBIT = {ev_ebit['enterprise_value']:,.0f} / {ev_ebit['ebit']:,.0f} "
+                f"= {ev_ebit['ev_ebit_ratio']:.1f}x. {ev_ebit['note']}"
+            )
             findings.append(Finding(
                 claim=f"{self.company_ticker} EV/EBIT ratio: {ev_ebit['ev_ebit_ratio']:.1f}x.",
-                evidence_text=ev_ebit["note"],
+                evidence_text=ev_evidence,
                 source_chunk_id=f"{self.company_ticker}_ev_ebit",
                 source_form="market_data_and_XBRL",
                 source_filing_date=ev_ebit["ebit_period"],

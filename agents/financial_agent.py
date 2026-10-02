@@ -81,11 +81,22 @@ class FinancialAgent(BaseAgent):
                 confidence=1.0,
             ))
 
+        periods_sorted = sorted(summary["revenue"].keys())
         for period, growth in summary["revenue_yoy_growth"].items():
+            idx = periods_sorted.index(period)
+            prev_period = periods_sorted[idx - 1] if idx > 0 else None
+            prev_val = summary["revenue"].get(prev_period) if prev_period else None
+            curr_val = summary["revenue"][period]
+            evidence = (
+                f"Revenue {prev_period}=${prev_val:,.0f}, {period}=${curr_val:,.0f}. "
+                f"YoY growth = (current - prior) / |prior| * 100 = "
+                f"({curr_val:,.0f} - {prev_val:,.0f}) / {abs(prev_val):,.0f} * 100 = {growth:+.1f}%."
+                if prev_val is not None else "Prior period unavailable."
+            )
             findings.append(Finding(
                 claim=f"{self.company_ticker} revenue grew {growth:+.1f}% YoY "
                       f"for the fiscal year ended {period}.",
-                evidence_text=f"YoY growth computed from consecutive annual revenue figures.",
+                evidence_text=evidence,
                 source_chunk_id=f"{self.company_ticker}_revenue_yoy_{period}",
                 source_form="XBRL_metrics",
                 source_filing_date=period,
@@ -97,10 +108,17 @@ class FinancialAgent(BaseAgent):
         findings = []
         net_margins = summary["margins"]["net_margin"]
         for period, margin in net_margins.items():
+            ni = summary["net_income"].get(period)
+            rev = summary["revenue"].get(period)
+            evidence = (
+                f"Net Income ({period}) = ${ni:,.0f}; Revenue ({period}) = ${rev:,.0f}. "
+                f"Net margin = {ni:,.0f} / {rev:,.0f} * 100 = {margin:.1f}%."
+                if ni is not None and rev is not None else "Underlying figures unavailable."
+            )
             findings.append(Finding(
                 claim=f"{self.company_ticker} net margin was {margin:.1f}% "
                       f"for the fiscal year ended {period}.",
-                evidence_text="Net margin = Net Income / Revenue * 100.",
+                evidence_text=evidence,
                 source_chunk_id=f"{self.company_ticker}_net_margin_{period}",
                 source_form="XBRL_metrics",
                 source_filing_date=period,
@@ -112,10 +130,16 @@ class FinancialAgent(BaseAgent):
         findings = []
         roe = summary["returns"]["roe"]
         for period, value in roe.items():
+            ni = summary["net_income"].get(period)
+            evidence = (
+                f"Net Income ({period}) = ${ni:,.0f}. "
+                f"ROE = Net Income / Stockholders' Equity * 100 = {value:.1f}%."
+                if ni is not None else "Underlying net income unavailable."
+            )
             findings.append(Finding(
                 claim=f"{self.company_ticker} ROE was {value:.1f}% "
                       f"for the fiscal year ended {period}.",
-                evidence_text="ROE = Net Income / Stockholders' Equity * 100.",
+                evidence_text=evidence,
                 source_chunk_id=f"{self.company_ticker}_roe_{period}",
                 source_form="XBRL_metrics",
                 source_filing_date=period,
