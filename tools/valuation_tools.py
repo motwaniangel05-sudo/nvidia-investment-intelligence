@@ -196,9 +196,21 @@ def run_dcf_scenarios(
     results = {}
     for name, rate in GROWTH_SCENARIOS.items():
         try:
+            # For historical_cagr (rate=None), resolve the actual CAGR
+            # explicitly BEFORE calling run_dcf, so the real rate used is
+            # always visible in assumptions/claim text -- not displayed
+            # as "None" (a transparency gap the Red-Team Agent caught).
+            resolved_rate = rate
+            if resolved_rate is None:
+                revenue = get_annual_series("revenue", company_ticker)
+                cagr_pct = calculate_cagr(revenue)
+                if cagr_pct is None:
+                    raise ValueError(f"Could not compute historical CAGR for {company_ticker}")
+                resolved_rate = cagr_pct / 100
+
             dcf = run_dcf(
                 company_ticker, wacc=wacc, terminal_growth=terminal_growth,
-                forecast_years=forecast_years, revenue_growth_rate=rate,
+                forecast_years=forecast_years, revenue_growth_rate=resolved_rate,
             )
             dcf["scenario_name"] = name
             dcf["scenario_is_historical_extrapolation"] = (name == "historical_cagr")

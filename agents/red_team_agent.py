@@ -74,13 +74,21 @@ def check_unsupported_numeric_claims(findings: List[Finding], source_agent: str)
     results = []
     number_pattern = re.compile(r"[\d,]+\.?\d*%?")
 
+    def _clean_numbers(text):
+        raw = number_pattern.findall(text)
+        cleaned = set()
+        for n in raw:
+            n = n.strip(".,")  # strip trailing/leading punctuation (e.g. "4,805.")
+            if len(n) > 1 and any(c.isdigit() for c in n):
+                cleaned.add(n)
+        return cleaned
+
     for f in findings:
-        claim_numbers = set(number_pattern.findall(f.claim))
-        claim_numbers = {n for n in claim_numbers if len(n) > 1}  # ignore stray single digits
+        claim_numbers = _clean_numbers(f.claim)
         if not claim_numbers:
             continue
 
-        evidence_numbers = set(number_pattern.findall(f.evidence_text))
+        evidence_numbers = _clean_numbers(f.evidence_text)
         if not (claim_numbers & evidence_numbers) and claim_numbers:
             # No overlap at all between numbers in claim and in evidence
             results.append(VerificationResult(
