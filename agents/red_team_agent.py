@@ -80,7 +80,7 @@ def check_unsupported_numeric_claims(findings: List[Finding], source_agent: str)
         for n in raw:
             n = n.strip(".,")  # strip trailing/leading punctuation (e.g. "4,805.")
             if len(n) > 1 and any(c.isdigit() for c in n):
-                cleaned.add(n)
+                cleaned.add(n.rstrip("%"))  # "45.8%" and "45.8" are the same number
         return cleaned
 
     for f in findings:
@@ -150,7 +150,7 @@ def check_historical_cagr_outlier(findings: List[Finding], source_agent: str) ->
         return results
 
     values = [v for _, v in evs]
-    median_ev = sorted(values)[len(values) // 2]
+    median_ev = sorted(values)[(len(values) - 1) // 2]  # lower median, so 2 scenarios can be compared
 
     for finding, ev in evs:
         if ev > median_ev * 2 and "likely unrealistic" not in finding.claim.lower():

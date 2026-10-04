@@ -49,9 +49,13 @@ def test_any_overlapping_number_counts_as_support():
     assert rt.check_unsupported_numeric_claims([f], "A") == []
 
 
-def test_percent_sign_must_match_between_claim_and_evidence():
-    # Current behavior: "45.8%" and "45.8" are different tokens, so this is flagged
+def test_percent_sign_does_not_cause_false_positive():
     f = _f("Revenue grew 45.8%", "grew 45.8 percent")
+    assert rt.check_unsupported_numeric_claims([f], "A") == []
+
+
+def test_percent_claim_with_different_number_is_still_flagged():
+    f = _f("Revenue grew 45.8%", "grew 12.3 percent")
     assert len(rt.check_unsupported_numeric_claims([f], "A")) == 1
 
 
@@ -124,9 +128,14 @@ def test_outlier_check_ignores_non_dcf_findings():
     assert rt.check_historical_cagr_outlier(findings, "A") == []
 
 
-def test_two_scenarios_can_never_be_flagged():
-    # Current behavior: with 2 values the "median" is the larger one, so nothing exceeds 2x it
-    assert rt.check_historical_cagr_outlier([_dcf(100), _dcf(1000)], "A") == []
+def test_two_scenarios_can_be_flagged():
+    out = rt.check_historical_cagr_outlier([_dcf(100), _dcf(1000)], "A")
+    assert len(out) == 1
+    assert "1,000" in out[0].claim
+
+
+def test_two_similar_scenarios_are_not_flagged():
+    assert rt.check_historical_cagr_outlier([_dcf(100), _dcf(150)], "A") == []
 
 
 # ---- check_revenue_consistency ----
