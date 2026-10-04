@@ -11,6 +11,7 @@ with this project's no-pretrained-LLM constraint -- not an attempt to
 import re
 from typing import Dict, List
 
+from agents.synthesis_agent import synthesize
 from core.logger import get_logger
 from core.schemas import AgentResult
 from agents.financial_agent import FinancialAgent
@@ -91,7 +92,12 @@ def classify_query(query: str) -> List[str]:
     return matched
 
 
-def run_query(company_ticker: str, query: str, run_verification_step: bool = True) -> Dict:
+def run_query(
+    company_ticker: str,
+    query: str,
+    run_verification_step: bool = True,
+    synthesize_report: bool = False,
+) -> Dict:
     """
     Main entry: classify the query, run matched agents, optionally run
     Red-Team verification, return everything in a structured response.
@@ -112,13 +118,16 @@ def run_query(company_ticker: str, query: str, run_verification_step: bool = Tru
         log.info("Running Red-Team verification...")
         verification = run_verification(agent_results)
 
-    return {
+    response = {
         "query": query,
         "company_ticker": company_ticker,
         "agents_activated": matched_agents,
         "agent_results": agent_results,
         "verification": verification,
     }
+    if synthesize_report:
+        response["synthesis"] = synthesize(response)
+    return response
 
 
 if __name__ == "__main__":

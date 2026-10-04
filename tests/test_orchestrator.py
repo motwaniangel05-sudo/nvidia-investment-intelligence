@@ -156,3 +156,58 @@ def test_short_keywords_still_match_as_whole_tokens():
 
 def test_long_keywords_remain_substring_matches():
     assert orchestrator._keyword_matches("earn", "quarterly earnings")
+
+
+# ---- optional synthesis step ----
+from agents.synthesis_agent import SynthesisReport
+from core.schemas import AgentResult
+
+
+def test_synthesis_is_off_by_default():
+    mocks = _all_mocked()
+    with patch.dict(orchestrator.AGENT_CLASSES, mocks), \
+         patch.object(orchestrator, "synthesize") as mock_synth:
+        response = orchestrator.run_query(
+            company_ticker="NVDA", query="revenue growth margin",
+            run_verification_step=False,
+        )
+
+    mock_synth.assert_not_called()
+    assert "synthesis" not in response
+
+
+def test_synthesis_runs_on_the_full_response_when_enabled():
+    mocks = _all_mocked()
+    keys_seen = []
+
+    def fake_synthesize(resp):
+        keys_seen.append(set(resp))
+        return "REPORT"
+
+    with patch.dict(orchestrator.AGENT_CLASSES, mocks), \
+         patch.object(orchestrator, "synthesize", side_effect=fake_synthesize):
+        response = orchestrator.run_query(
+            company_ticker="NVDA", query="revenue growth margin",
+            run_verification_step=False, synthesize_report=True,
+        )
+
+    assert keys_seen == [{"query", "company_ticker", "agents_activated",
+                          "agent_results", "verification"}]
+    assert response["synthesis"] == "REPORT"
+
+
+def test_real_synthesis_report_is_returned_when_enabled():
+    mocks = _all_mocked()
+    mocks["FinancialAgent"].return_value.run.return_value = AgentResult(
+        agent_name="FinancialAgent", task="t",
+    )
+    with patch.dict(orchestrator.AGENT_CLASSES, mocks):
+        response = orchestrator.run_query(
+            company_ticker="NVDA", query="revenue growth margin",
+            run_verification_step=False, synthesize_report=True,
+        )
+
+    report = response["synthesis"]
+    assert isinstance(report, SynthesisReport)
+    assert report.overall_status == "complete"
+    assert list(report.agents) == ["FinancialAgent"]
