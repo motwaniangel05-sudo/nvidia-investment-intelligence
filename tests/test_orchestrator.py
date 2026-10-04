@@ -122,3 +122,37 @@ def test_run_query_response_structure_and_agent_wiring():
 
     mocks["FinancialAgent"].assert_called_once_with(company_ticker="NVDA")
     mocks["FinancialAgent"].return_value.run.assert_called_once_with("revenue growth margin")
+
+
+def test_keyword_agents_and_class_agents_match():
+    assert set(orchestrator.AGENT_KEYWORDS) == set(orchestrator.AGENT_CLASSES)
+
+
+def test_every_agent_has_at_least_one_keyword():
+    for name, keywords in orchestrator.AGENT_KEYWORDS.items():
+        assert keywords, f"{name} has no keywords and can never be matched"
+
+
+def test_keywords_are_lowercase():
+    # classify_query lowercases the query, so an uppercase keyword never matches.
+    for name, keywords in orchestrator.AGENT_KEYWORDS.items():
+        for kw in keywords:
+            assert kw == kw.lower(), f"{name} keyword {kw!r} is not lowercase"
+
+
+def test_short_keywords_do_not_match_inside_longer_words():
+    assert not orchestrator._keyword_matches("roa", "broad market")
+    assert not orchestrator._keyword_matches("roa", "product roadmap")
+    assert not orchestrator._keyword_matches("roe", "heroes")
+
+
+def test_short_keywords_still_match_as_whole_tokens():
+    assert orchestrator._keyword_matches("roa", "what is the roa?")
+    assert orchestrator._keyword_matches("roe", "roe and margins")
+    assert orchestrator._keyword_matches("p/e", "current p/e ratio")
+    assert orchestrator._keyword_matches("8-k", "latest 8-k filing")
+    assert orchestrator._keyword_matches("vs", "nvda vs amd")
+
+
+def test_long_keywords_remain_substring_matches():
+    assert orchestrator._keyword_matches("earn", "quarterly earnings")

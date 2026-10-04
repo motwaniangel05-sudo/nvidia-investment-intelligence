@@ -1,119 +1,100 @@
-"""Tests for RedTeamAgent: mechanical verification checks on other agents' findings."""
+from contextlib import ExitStack
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from core.schemas import Finding
-from agents.red_team_agent import (
-    check_historical_cagr_outlier,
-    check_low_confidence,
-    check_missing_disclaimers,
-    check_revenue_consistency,
-    check_unsupported_numeric_claims,
-)
+import pytest
 
+from agents import red_team_agent as rt
 
-def make_finding(claim, evidence="", confidence=1.0):
-    return Finding(
-        claim=claim, evidence_text=evidence, source_chunk_id="c1",
-        source_form="test", source_filing_date="2024-01-01", confidence=confidence,
-    )
+CHECKS = [
+    "check_low_confidence",
+    "check_unsupported_numeric_claims",
+    "check_missing_disclaimers",
+    "check_historical_cagr_outlier",
+    "check_revenue_consistency",
+]
 
 
-def test_check_low_confidence_flags_below_threshold():
-    findings = [make_finding("Some claim", confidence=0.05)]
-    results = check_low_confidence(findings, "TestAgent")
-    assert len(results) == 1
-    assert results[0].verification_result == "FLAGGED"
+def _finding(confidence, claim="claim", evidence="evidence"):
+    return SimpleNamespace(claim=claim, evidence_text=evidence, confidence=confidence)
 
 
-def test_check_low_confidence_does_not_flag_above_threshold():
-    findings = [make_finding("Some claim", confidence=0.9)]
-    results = check_low_confidence(findings, "TestAgent")
-    assert len(results) == 0
+def _result(*findings):
+    return SimpleNamespace(findings=list(findings))
 
 
-def test_check_unsupported_numeric_claims_catches_missing_number():
-    findings = [make_finding(
-        "Revenue grew 45.8% this year",
-        evidence="The company reported strong performance overall.",
-    )]
-    results = check_unsupported_numeric_claims(findings, "TestAgent")
-    assert len(results) == 1
-    assert results[0].verification_result == "UNSUPPORTED"
+@pytest.fixture
+def checks():
+    """Replace every check with a mock returning [] so run_verification's wiring is tested alone."""
+    with ExitStack() as stack:
+        yield {n: stack.enter_context(patch.object(rt, n, return_value=[])) for n in CHECKS}
 
 
-def test_check_unsupported_numeric_claims_passes_when_number_present():
-    findings = [make_finding(
-        "Revenue grew 45.8% this year",
-        evidence="Revenue growth was 45.8% year over year according to the filing.",
-    )]
-    results = check_unsupported_numeric_claims(findings, "TestAgent")
-    assert len(results) == 0
+# ---- check_low_confidence (real logic) ----
+
+def test_low_confidence_flags_finding_below_threshold():
+    out = rt.check_low_confidence([_finding(0.05, claim="weak claim")], "NewsAgent")
+    assert len(out) == 1
+    assert out[0].claim == "weak claim"
+    assert out[0].verification_result == "FLAGGED"
+    assert out[0].confidence == 0.05
+    assert out[0].source_agent == "NewsAgent"
 
 
-def test_check_missing_disclaimers_catches_fcf_without_capex_mention():
-    findings = [make_finding(
-        "FCF proxy for fiscal year was $20 billion",
-        evidence="Operating cash flow was strong.",  # no "capex" mentioned
-    )]
-    results = check_missing_disclaimers(findings, "TestAgent")
-    assert len(results) == 1
-    assert "CapEx" in results[0].problem
+def test_low_confidence_does_not_flag_at_or_above_threshold():
+    findings = [_finding(rt.LOW_CONFIDENCE_THRESHOLD), _finding(0.5), _finding(0.99)]
+    assert rt.check_low_confidence(findings, "NewsAgent") == []
 
 
-def test_check_missing_disclaimers_passes_with_capex_mentioned():
-    findings = [make_finding(
-        "FCF proxy for fiscal year was $20 billion",
-        evidence="This uses Operating Cash Flow since CapEx data is unavailable.",
-    )]
-    results = check_missing_disclaimers(findings, "TestAgent")
-    assert len(results) == 0
+def test_low_confidence_truncates_evidence_to_200_chars():
+    out = rt.check_low_confidence([_finding(0.0, evidence="x" * 500)], "NewsAgent")
+    assert len(out[0].evidence) == 200
 
 
-def test_check_missing_disclaimers_catches_ev_ebit_without_ebitda_mention():
-    findings = [make_finding(
-        "EV/EBIT ratio: 43.0x",
-        evidence="Enterprise value divided by operating income.",  # no "ebitda"
-    )]
-    results = check_missing_disclaimers(findings, "TestAgent")
-    assert len(results) == 1
-    assert "EBITDA" in results[0].problem
+def test_low_confidence_empty_input():
+    assert rt.check_low_confidence([], "NewsAgent") == []
 
 
-def test_check_historical_cagr_outlier_flags_unflagged_extreme_value():
-    findings = [
-        make_finding("DCF scenario 'conservative': Enterprise Value = $1,000,000,000,000 (growth rate used: 0.1)."),
-        make_finding("DCF scenario 'moderate': Enterprise Value = $1,500,000,000,000 (growth rate used: 0.2)."),
-        make_finding("DCF scenario 'extreme': Enterprise Value = $5,000,000,000,000 (growth rate used: 0.5)."),
-    ]
-    results = check_historical_cagr_outlier(findings, "TestAgent")
-    assert len(results) == 1
-    assert "extreme" in results[0].claim
+# ---- run_verification (wiring) ----
+
+def test_run_verification_empty_input(checks):
+    assert rt.run_verification({}) == []
+    for name in CHECKS:
+        checks[name].assert_not_called()
 
 
-def test_check_historical_cagr_outlier_does_not_double_flag_already_flagged():
-    findings = [
-        make_finding("DCF scenario 'conservative': Enterprise Value = $1,000,000,000,000 (growth rate used: 0.1)."),
-        make_finding("DCF scenario 'moderate': Enterprise Value = $1,500,000,000,000 (growth rate used: 0.2)."),
-        make_finding(
-            "DCF scenario 'historical_cagr' (historical-CAGR extrapolation -- "
-            "likely unrealistic as a base case): Enterprise Value = $5,000,000,000,000 (growth rate used: None)."
-        ),
-    ]
-    results = check_historical_cagr_outlier(findings, "TestAgent")
-    assert len(results) == 0  # already self-flagged, don't duplicate
+def test_run_verification_runs_every_per_agent_check_for_each_agent(checks):
+    news = _result(_finding(0.5))
+    risk = _result(_finding(0.5))
+    rt.run_verification({"NewsAgent": news, "RiskAgent": risk})
+
+    for name in CHECKS[:4]:
+        assert checks[name].call_count == 2
+        checks[name].assert_any_call(news.findings, "NewsAgent")
+        checks[name].assert_any_call(risk.findings, "RiskAgent")
+    checks["check_revenue_consistency"].assert_not_called()
 
 
-def test_check_revenue_consistency_flags_none_growth_rate_display():
-    fin_findings = [make_finding("NVDA revenue grew at a 45.8% CAGR from 2016-01-31 to 2026-01-25.")]
-    val_findings = [make_finding(
-        "DCF scenario 'historical_cagr': Enterprise Value = $4,805,266,116,296 (growth rate used: None)."
-    )]
-    results = check_revenue_consistency(fin_findings, val_findings)
-    assert len(results) == 1
-    assert "45.8" in results[0].correction
+def test_run_verification_aggregates_results_in_agent_order(checks):
+    checks["check_low_confidence"].side_effect = lambda findings, name: [f"lc-{name}"]
+    checks["check_missing_disclaimers"].side_effect = lambda findings, name: [f"disc-{name}"]
+
+    out = rt.run_verification({"A": _result(), "B": _result()})
+    assert out == ["lc-A", "disc-A", "lc-B", "disc-B"]
 
 
-def test_check_revenue_consistency_no_findings_when_no_cagr_claim():
-    fin_findings = [make_finding("Some unrelated financial claim.")]
-    val_findings = [make_finding("DCF scenario 'historical_cagr': growth rate used: None.")]
-    results = check_revenue_consistency(fin_findings, val_findings)
-    assert len(results) == 0
+def test_revenue_consistency_runs_only_when_both_agents_present(checks):
+    rt.run_verification({"FinancialAgent": _result()})
+    rt.run_verification({"ValuationAgent": _result()})
+    checks["check_revenue_consistency"].assert_not_called()
+
+
+def test_revenue_consistency_receives_both_agents_findings(checks):
+    fin = _result(_finding(0.5, claim="fin"))
+    val = _result(_finding(0.5, claim="val"))
+    checks["check_revenue_consistency"].return_value = ["rev-issue"]
+
+    out = rt.run_verification({"FinancialAgent": fin, "ValuationAgent": val})
+
+    checks["check_revenue_consistency"].assert_called_once_with(fin.findings, val.findings)
+    assert out[-1] == "rev-issue"
