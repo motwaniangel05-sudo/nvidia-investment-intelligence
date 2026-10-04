@@ -190,3 +190,34 @@ def test_margins_skip_zero_revenue_period_but_keep_others():
 
     assert out["gross_margin"] == {"2024-01-28": pytest.approx(60.0)}
     assert out["net_margin"] == {"2024-01-28": pytest.approx(25.0)}
+
+
+
+# ---- build_financial_summary wiring ----
+
+def test_build_financial_summary_assembles_every_section_and_passes_year_range():
+    series = {
+        "revenue": {"2023-01-29": 100.0, "2024-01-28": 200.0},
+        "net_income": {"2023-01-29": 10.0, "2024-01-28": 40.0},
+    }
+    with _patch.object(ft, "get_annual_series", side_effect=lambda name, t, s=None, e=None: series[name]), \
+         _patch.object(ft, "calculate_margins", return_value={"m": 1}) as mock_margins, \
+         _patch.object(ft, "calculate_fcf", return_value={"f": 2}) as mock_fcf, \
+         _patch.object(ft, "calculate_roe_roa", return_value={"roe": {}, "roa": {}}) as mock_ret:
+        out = ft.build_financial_summary("NVDA", start_year=2020, end_year=2025)
+
+    assert set(out) == {
+        "company_ticker", "revenue", "revenue_yoy_growth", "revenue_cagr",
+        "net_income", "net_income_yoy_growth", "margins", "free_cash_flow", "returns",
+    }
+    assert out["company_ticker"] == "NVDA"
+    assert out["revenue"] == series["revenue"]
+    assert out["revenue_yoy_growth"] == ft.calculate_yoy_growth(series["revenue"])
+    assert out["revenue_cagr"] == ft.calculate_cagr(series["revenue"])
+    assert out["net_income_yoy_growth"] == ft.calculate_yoy_growth(series["net_income"])
+    assert out["margins"] == {"m": 1}
+    assert out["free_cash_flow"] == {"f": 2}
+    assert out["returns"] == {"roe": {}, "roa": {}}
+    mock_margins.assert_called_once_with("NVDA", 2020, 2025)
+    mock_fcf.assert_called_once_with("NVDA", 2020, 2025)
+    mock_ret.assert_called_once_with("NVDA", 2020, 2025)
