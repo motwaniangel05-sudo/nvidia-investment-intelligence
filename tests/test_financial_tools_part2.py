@@ -137,3 +137,56 @@ def test_roe_skipped_when_equity_missing(tmp_path, monkeypatch):
     result = calculate_roe_roa("NVDA")
     assert "2016-01-31" not in result["roe"]
     assert "2016-01-31" not in result["roa"]
+
+
+
+# ---- date parsing, available metrics, CAGR guard, zero-revenue margins ----
+from unittest.mock import patch as _patch
+
+from tools import financial_tools as ft
+
+
+@pytest.mark.parametrize("value", [None, "", "not-a-date", "2024/01/28", "2024-13-45"])
+def test_parse_date_returns_none_for_missing_or_malformed_values(value):
+    assert ft._parse_date(value) is None
+
+
+def test_parse_date_parses_iso_date():
+    assert ft._parse_date("2024-01-28").isoformat() == "2024-01-28"
+
+
+def test_is_annual_duration_false_when_either_date_missing_or_invalid():
+    assert ft._is_annual_duration(None, "2024-01-28") is False
+    assert ft._is_annual_duration("2023-01-28", None) is False
+    assert ft._is_annual_duration("garbage", "2024-01-28") is False
+
+
+def test_is_annual_duration_true_for_365_days_false_for_quarter():
+    assert ft._is_annual_duration("2023-01-28", "2024-01-28") is True
+    assert ft._is_annual_duration("2023-10-30", "2024-01-28") is False
+
+
+def test_get_available_metrics_lists_every_configured_metric():
+    metrics = ft.get_available_metrics()
+    assert metrics == list(ft.METRIC_CONCEPTS.keys())
+    assert "revenue" in metrics
+
+
+def test_cagr_returns_none_when_both_dates_are_the_same_day():
+    # Different strings, same calendar date: years == 0
+    series = {"2024-01-05": 100.0, "2024-1-05": 200.0}
+    assert ft.calculate_cagr(series) is None
+
+
+def test_margins_skip_zero_revenue_period_but_keep_others():
+    data = {
+        "revenue": {"2023-01-29": 0.0, "2024-01-28": 200.0},
+        "gross_profit": {"2023-01-29": 10.0, "2024-01-28": 120.0},
+        "operating_income": {"2023-01-29": 5.0, "2024-01-28": 80.0},
+        "net_income": {"2023-01-29": 4.0, "2024-01-28": 50.0},
+    }
+    with _patch.object(ft, "get_annual_series", side_effect=lambda name, ticker, *a: data[name]):
+        out = ft.calculate_margins("NVDA")
+
+    assert out["gross_margin"] == {"2024-01-28": pytest.approx(60.0)}
+    assert out["net_margin"] == {"2024-01-28": pytest.approx(25.0)}
