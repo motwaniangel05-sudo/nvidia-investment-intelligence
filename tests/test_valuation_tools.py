@@ -459,3 +459,24 @@ def test_ev_ebit_none_when_no_price_row_and_connection_closed():
          patch.object(vt, "get_connection", return_value=conn):
         assert vt.calculate_ev_ebit("NVDA") is None
     conn.close.assert_called_once()
+
+
+# ---- calculate_fcf_proxy_margin zero-revenue handling ----
+
+def test_fcf_proxy_margin_none_when_all_overlapping_revenue_is_zero():
+    series = _series_for(
+        revenue={"2023": 0.0, "2024": 0.0},
+        operating_cash_flow={"2023": 10.0, "2024": 20.0},
+    )
+    with patch.object(vt, "get_annual_series", side_effect=series):
+        assert vt.calculate_fcf_proxy_margin("NVDA") is None
+
+
+def test_fcf_proxy_margin_skips_zero_revenue_year_but_averages_the_rest():
+    series = _series_for(
+        revenue={"2022": 0.0, "2023": 100.0, "2024": 200.0},
+        operating_cash_flow={"2022": 5.0, "2023": 50.0, "2024": 40.0},
+    )
+    with patch.object(vt, "get_annual_series", side_effect=series):
+        # (50/100 + 40/200) / 2 = 0.35; the 2022 zero-revenue year is excluded
+        assert vt.calculate_fcf_proxy_margin("NVDA") == pytest.approx(0.35)
