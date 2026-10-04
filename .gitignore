@@ -57,3 +57,4 @@ models/embeddings/tfidf_store.pkl
 # Manually-labeled training data (Phase 10) -- real human-labeled work,
 # not regenerable, must be tracked regardless of other data/processed/ rules
 !data/processed/labeling_template.csv
+.coverage
