@@ -1,3 +1,5 @@
+![tests](https://github.com/motwaniangel05-sudo/nvidia-investment-intelligence/actions/workflows/tests.yml/badge.svg)
+
 # AI-Powered Investment Intelligence & Financial Due-Diligence System
 
 A multi-agent financial research system built from scratch (no LLM APIs),
