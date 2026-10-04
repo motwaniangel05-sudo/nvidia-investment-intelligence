@@ -184,3 +184,36 @@ def test_works_with_real_run_verification_output():
     r = synthesize(_resp(results, run_verification(results)))
     assert r.agents["NewsAgent"]["flagged_finding_count"] == 1
     assert r.verification_summary["by_result"] == {"FLAGGED": 1}
+
+
+# ---- ties in confidence: newest finding first ----
+
+def _dated(claim, confidence, date):
+    return Finding(
+        claim=claim, evidence_text="e", source_chunk_id="c",
+        source_form="XBRL_metrics", source_filing_date=date, confidence=confidence,
+    )
+
+
+def _heads(findings, n=3):
+    r = synthesize(_resp({"A": _result("A", findings)}), max_findings_per_agent=n)
+    return [h["claim"] for h in r.agents["A"]["headline_findings"]]
+
+
+def test_equal_confidence_prefers_most_recent_filing_date():
+    findings = [
+        _dated("old", 1.0, "2017-01-29"),
+        _dated("newest", 1.0, "2026-01-25"),
+        _dated("middle", 1.0, "2020-01-26"),
+    ]
+    assert _heads(findings, 2) == ["newest", "middle"]
+
+
+def test_missing_date_ranks_below_real_dates():
+    findings = [_dated("no date", 1.0, "n/a"), _dated("dated", 1.0, "2016-01-31")]
+    assert _heads(findings, 1) == ["dated"]
+
+
+def test_confidence_still_beats_recency():
+    findings = [_dated("new but weaker", 0.5, "2026-01-25"), _dated("old but stronger", 1.0, "2016-01-31")]
+    assert _heads(findings, 1) == ["old but stronger"]

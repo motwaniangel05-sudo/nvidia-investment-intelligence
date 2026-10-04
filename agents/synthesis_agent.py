@@ -52,8 +52,17 @@ def _problem_index(verification: list) -> dict:
     return index
 
 
+def _recency(date: str) -> str:
+    """Dates look like '2026-01-25'. Anything else (for example 'n/a') counts as oldest."""
+    return date if date[:1].isdigit() else ""
+
+
 def _summarize_agent(name: str, result, problems: dict, max_findings: int) -> dict:
-    ranked = sorted(result.findings, key=lambda f: f.confidence, reverse=True)
+    ranked = sorted(
+        result.findings,
+        key=lambda f: (f.confidence, _recency(f.source_filing_date)),
+        reverse=True,
+    )
     headlines = [
         {
             "claim": f.claim,
