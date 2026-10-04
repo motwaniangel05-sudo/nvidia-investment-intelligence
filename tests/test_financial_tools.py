@@ -150,3 +150,31 @@ def test_only_10k_form_considered(tmp_path, monkeypatch):
 
     result = get_annual_series("revenue", "NVDA")
     assert result == {}
+
+
+
+# ---- year filter: end_year cutoff and unparseable period_end ----
+
+def test_end_year_excludes_later_periods(tmp_path, monkeypatch):
+    make_test_db(tmp_path, monkeypatch)
+    conn = get_connection(tmp_path / "test.db")
+    seed_metric(conn, "NVDA", "Revenues", 5000000000, "2015-02-01", "2016-01-31")
+    seed_metric(conn, "NVDA", "Revenues", 26900000000, "2021-02-01", "2022-01-30")
+    conn.commit()
+    conn.close()
+
+    result = get_annual_series("revenue", "NVDA", end_year=2018)
+    assert "2016-01-31" in result
+    assert "2022-01-30" not in result
+
+
+def test_year_filter_drops_period_with_unparseable_end_date(tmp_path, monkeypatch):
+    make_test_db(tmp_path, monkeypatch)
+    conn = get_connection(tmp_path / "test.db")
+    seed_metric(conn, "NVDA", "Assets", 1000, None, "2016-01-31")
+    seed_metric(conn, "NVDA", "Assets", 2000, None, "not-a-date")
+    conn.commit()
+    conn.close()
+
+    result = get_annual_series("assets", "NVDA", start_year=2010)
+    assert result == {"2016-01-31": 1000}
