@@ -107,3 +107,73 @@ def test_research_agent_finding_has_correct_metadata():
     assert finding.source_filing_date == "2024-01-28"
     assert finding.confidence == 0.30
     assert "data center segment" in finding.evidence_text
+
+
+
+# ---- BaseAgent.retrieve, verify edge cases, abstract method ----
+from agents import base_agent as ba
+
+
+def test_default_retrieve_delegates_to_rag_retriever_with_top_k():
+    with patch.object(ba, "rag_retrieve", return_value=[{"chunk_id": "c1"}]) as mock_rag:
+        out = DummyAgent("NVDA").retrieve("revenue?", top_k=3)
+
+    mock_rag.assert_called_once_with("revenue?", top_k=3)
+    assert out == [{"chunk_id": "c1"}]
+
+
+def test_default_retrieve_uses_top_k_of_5_by_default():
+    with patch.object(ba, "rag_retrieve", return_value=[]) as mock_rag:
+        DummyAgent("NVDA").retrieve("q")
+    mock_rag.assert_called_once_with("q", top_k=5)
+
+
+def test_default_retrieve_returns_empty_list_when_retriever_raises():
+    with patch.object(ba, "rag_retrieve", side_effect=RuntimeError("index down")):
+        assert DummyAgent("NVDA").retrieve("q") == []
+
+
+def test_verify_does_not_flag_confidence_exactly_at_threshold():
+    result = AgentResult(
+        agent_name="DummyAgent", task="x",
+        findings=[Finding("c", "e", "id1", "10-K", "2024-01-01", 0.05)],
+    )
+    verified = DummyAgent("NVDA").verify(result)
+    assert verified.warnings == []
+    assert verified.status == "success"
+
+
+def test_verify_counts_every_low_confidence_finding():
+    findings = [
+        Finding("c", "e", f"id{i}", "10-K", "2024-01-01", conf)
+        for i, conf in enumerate([0.01, 0.02, 0.5])
+    ]
+    result = AgentResult(agent_name="DummyAgent", task="x", findings=findings)
+    verified = DummyAgent("NVDA").verify(result)
+    assert any("2 finding(s)" in w for w in verified.warnings)
+
+
+def test_verify_empty_findings_keeps_failed_status():
+    result = AgentResult(agent_name="DummyAgent", task="x", findings=[], status="failed")
+    verified = DummyAgent("NVDA").verify(result)
+    assert verified.status == "failed"
+    assert any("No findings" in w for w in verified.warnings)
+
+
+def test_run_skips_verify_when_analyze_raises():
+    agent = FailingAgent("NVDA")
+    with patch.object(agent, "verify") as mock_verify:
+        result = agent.run("task")
+    mock_verify.assert_not_called()
+    assert result.status == "failed"
+    assert result.agent_name == "FailingAgent"
+    assert result.task == "task"
+
+
+def test_abstract_analyze_raises_not_implemented_when_called_via_super():
+    class CallsSuper(BaseAgent):
+        def analyze(self, task):
+            return super().analyze(task)
+
+    with pytest.raises(NotImplementedError):
+        CallsSuper("NVDA").analyze("t")
