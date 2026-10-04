@@ -232,3 +232,230 @@ def test_calculate_ev_ebit_note_clarifies_not_ebitda():
 
     assert "EBITDA" in result["note"]
     assert "APPROXIMATED" in result["note"]
+
+
+# ---- scenario / sensitivity / P/E coverage ----
+from tools import valuation_tools as vt
+
+
+def _fake_dcf(*args, **kwargs):
+    return {
+        "enterprise_value": 1000.0,
+        "assumptions": {"revenue_growth_rate_used": kwargs["revenue_growth_rate"]},
+    }
+
+
+# run_dcf_scenarios
+
+def test_scenarios_resolve_historical_cagr_before_calling_run_dcf():
+    with patch.object(vt, "get_annual_series", return_value={"2020": 100.0, "2024": 200.0}), \
+         patch.object(vt, "calculate_cagr", return_value=25.0), \
+         patch.object(vt, "run_dcf", side_effect=_fake_dcf) as mock_dcf:
+        out = vt.run_dcf_scenarios("NVDA")
+
+    assert set(out) == set(vt.GROWTH_SCENARIOS)
+    assert out["historical_cagr"]["assumptions"]["revenue_growth_rate_used"] == 0.25
+    assert out["historical_cagr"]["scenario_is_historical_extrapolation"] is True
+    for name, result in out.items():
+        assert result["scenario_name"] == name
+        if name != "historical_cagr":
+            assert result["scenario_is_historical_extrapolation"] is False
+    assert mock_dcf.call_count == len(vt.GROWTH_SCENARIOS)
+
+
+def test_scenarios_skip_historical_when_cagr_unavailable():
+    with patch.object(vt, "get_annual_series", return_value={}), \
+         patch.object(vt, "calculate_cagr", return_value=None), \
+         patch.object(vt, "run_dcf", side_effect=_fake_dcf):
+        out = vt.run_dcf_scenarios("NVDA")
+
+    assert "historical_cagr" not in out
+    assert set(out) == set(vt.GROWTH_SCENARIOS) - {"historical_cagr"}
+
+
+def test_scenarios_skip_a_scenario_whose_dcf_raises_valueerror():
+    def flaky(*args, **kwargs):
+        if kwargs["revenue_growth_rate"] == vt.GROWTH_SCENARIOS["aggressive"]:
+            raise ValueError("boom")
+        return _fake_dcf(*args, **kwargs)
+
+    with patch.object(vt, "get_annual_series", return_value={"2020": 100.0, "2024": 200.0}), \
+         patch.object(vt, "calculate_cagr", return_value=25.0), \
+         patch.object(vt, "run_dcf", side_effect=flaky):
+        out = vt.run_dcf_scenarios("NVDA")
+
+    assert "aggressive" not in out
+    assert "historical_cagr" in out
+
+
+def test_scenarios_pass_wacc_terminal_growth_and_years_through():
+    with patch.object(vt, "get_annual_series", return_value={"2020": 100.0, "2024": 200.0}), \
+         patch.object(vt, "calculate_cagr", return_value=25.0), \
+         patch.object(vt, "run_dcf", side_effect=_fake_dcf) as mock_dcf:
+        vt.run_dcf_scenarios("NVDA", wacc=0.09, terminal_growth=0.02, forecast_years=7)
+
+    for call in mock_dcf.call_args_list:
+        assert call.kwargs["wacc"] == 0.09
+        assert call.kwargs["terminal_growth"] == 0.02
+        assert call.kwargs["forecast_years"] == 7
+
+
+# sensitivity_analysis
+
+def test_sensitivity_grid_shape_labels_and_values():
+    def fake(company_ticker, wacc, terminal_growth, forecast_years, revenue_growth_rate):
+        return {"enterprise_value": round(wacc * 1000 - terminal_growth * 100, 6)}
+
+    with patch.object(vt, "run_dcf", side_effect=fake):
+        grid = vt.sensitivity_analysis(
+            "NVDA", growth_rate=0.2, wacc_range=[0.08, 0.10], terminal_growth_range=[0.03, 0.10],
+        )
+
+    assert list(grid) == ["8.0%", "10.0%"]
+    assert list(grid["8.0%"]) == ["3.0%", "10.0%"]
+    assert grid["8.0%"]["3.0%"] == pytest.approx(77.0)
+    assert grid["10.0%"]["3.0%"] == pytest.approx(97.0)
+
+
+def test_sensitivity_marks_wacc_not_above_terminal_growth_as_none_without_calling_dcf():
+    with patch.object(vt, "run_dcf", return_value={"enterprise_value": 1.0}) as mock_dcf:
+        grid = vt.sensitivity_analysis(
+            "NVDA", growth_rate=0.2, wacc_range=[0.08, 0.10], terminal_growth_range=[0.03, 0.10],
+        )
+
+    assert grid["8.0%"]["10.0%"] is None    # wacc < tg
+    assert grid["10.0%"]["10.0%"] is None   # wacc == tg
+    assert mock_dcf.call_count == 2          # only the two valid combinations
+
+
+def test_sensitivity_records_none_when_dcf_raises():
+    with patch.object(vt, "run_dcf", side_effect=ValueError("bad")):
+        grid = vt.sensitivity_analysis(
+            "NVDA", growth_rate=0.2, wacc_range=[0.10], terminal_growth_range=[0.03],
+        )
+    assert grid == {"10.0%": {"3.0%": None}}
+
+
+def test_sensitivity_uses_default_ranges_when_none_given():
+    with patch.object(vt, "run_dcf", return_value={"enterprise_value": 1.0}):
+        grid = vt.sensitivity_analysis("NVDA", growth_rate=0.2)
+    assert list(grid) == [f"{w:.1%}" for w in vt.DEFAULT_WACC_RANGE]
+    first = next(iter(grid.values()))
+    assert list(first) == [f"{t:.1%}" for t in vt.DEFAULT_TERMINAL_GROWTH_RANGE]
+
+
+# calculate_pe_ratio
+
+def _fake_conn(row):
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.return_value = row
+    return conn
+
+
+def test_pe_ratio_uses_latest_eps_and_latest_price():
+    conn = _fake_conn({"date": "2024-12-31", "close": 120.0})
+    with patch.object(vt, "get_annual_series", return_value={"2023-01-29": 2.0, "2024-01-28": 4.0}), \
+         patch.object(vt, "get_connection", return_value=conn):
+        out = vt.calculate_pe_ratio("NVDA")
+
+    assert out["pe_ratio"] == pytest.approx(30.0)
+    assert out["eps"] == 4.0
+    assert out["eps_period"] == "2024-01-28"
+    assert out["price"] == 120.0
+    assert out["price_date"] == "2024-12-31"
+    assert "period-matched" in out["note"]
+    conn.close.assert_called_once()
+
+
+def test_pe_ratio_none_when_no_eps_data():
+    with patch.object(vt, "get_annual_series", return_value={}):
+        assert vt.calculate_pe_ratio("NVDA") is None
+
+
+def test_pe_ratio_none_for_nonpositive_eps_without_touching_db():
+    with patch.object(vt, "get_annual_series", return_value={"2024-01-28": -1.5}), \
+         patch.object(vt, "get_connection") as mock_conn:
+        assert vt.calculate_pe_ratio("NVDA") is None
+    mock_conn.assert_not_called()
+
+
+def test_pe_ratio_none_when_no_price_row_and_connection_still_closed():
+    conn = _fake_conn(None)
+    with patch.object(vt, "get_annual_series", return_value={"2024-01-28": 4.0}), \
+         patch.object(vt, "get_connection", return_value=conn):
+        assert vt.calculate_pe_ratio("NVDA") is None
+    conn.close.assert_called_once()
+
+
+# ---- run_dcf error branches ----
+
+def test_run_dcf_raises_when_fcf_margin_unavailable():
+    with patch.object(vt, "forecast_revenue", return_value={"2025": 100.0, "2026": 200.0}), \
+         patch.object(vt, "calculate_fcf_proxy_margin", return_value=None):
+        with pytest.raises(ValueError, match="FCF-proxy margin"):
+            vt.run_dcf("NVDA", wacc=0.10, terminal_growth=0.03)
+
+
+@pytest.mark.parametrize("wacc, tg", [(0.03, 0.03), (0.02, 0.03)])
+def test_run_dcf_wacc_check_is_reached_with_valid_margin(wacc, tg):
+    with patch.object(vt, "forecast_revenue", return_value={"2025": 100.0, "2026": 200.0}), \
+         patch.object(vt, "calculate_fcf_proxy_margin", return_value=0.5):
+        with pytest.raises(ValueError, match="must exceed"):
+            vt.run_dcf("NVDA", wacc=wacc, terminal_growth=tg)
+
+
+# ---- calculate_ev_ebit early exits ----
+
+def _series_for(**by_name):
+    return lambda name, ticker: by_name.get(name, {})
+
+
+def test_ev_ebit_none_when_latest_period_missing_from_net_income():
+    series = _series_for(
+        operating_income={"2024": 100.0},
+        net_income={"2023": 80.0},
+        eps_diluted={"2024": 2.0},
+    )
+    with patch.object(vt, "get_annual_series", side_effect=series), \
+         patch.object(vt, "get_connection") as mock_conn:
+        assert vt.calculate_ev_ebit("NVDA") is None
+    mock_conn.assert_not_called()
+
+
+def test_ev_ebit_none_when_latest_period_missing_from_eps():
+    series = _series_for(
+        operating_income={"2024": 100.0},
+        net_income={"2024": 80.0},
+        eps_diluted={"2023": 2.0},
+    )
+    with patch.object(vt, "get_annual_series", side_effect=series), \
+         patch.object(vt, "get_connection") as mock_conn:
+        assert vt.calculate_ev_ebit("NVDA") is None
+    mock_conn.assert_not_called()
+
+
+def test_ev_ebit_none_when_eps_is_zero_instead_of_dividing():
+    series = _series_for(
+        operating_income={"2024": 100.0},
+        net_income={"2024": 80.0},
+        eps_diluted={"2024": 0.0},
+    )
+    with patch.object(vt, "get_annual_series", side_effect=series), \
+         patch.object(vt, "get_connection") as mock_conn:
+        assert vt.calculate_ev_ebit("NVDA") is None
+    mock_conn.assert_not_called()
+
+
+def test_ev_ebit_none_when_no_price_row_and_connection_closed():
+    series = _series_for(
+        operating_income={"2024": 100.0},
+        net_income={"2024": 80.0},
+        eps_diluted={"2024": 2.0},
+        long_term_debt={"2024": 10.0},
+        cash={"2024": 5.0},
+    )
+    conn = _fake_conn(None)
+    with patch.object(vt, "get_annual_series", side_effect=series), \
+         patch.object(vt, "get_connection", return_value=conn):
+        assert vt.calculate_ev_ebit("NVDA") is None
+    conn.close.assert_called_once()
