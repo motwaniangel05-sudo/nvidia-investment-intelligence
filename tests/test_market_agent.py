@@ -100,3 +100,63 @@ from agents.market_agent import MarketAgent as _MarketAgent
 
 def test_retrieve_is_unused_and_returns_empty_list():
     assert _MarketAgent("NVDA").retrieve("anything") == []
+
+
+# ---- calendar-year overlap handling ----
+
+def _run_market(target_series, comp_series, config=None):
+    def series(metric_name, ticker, start_year=None, end_year=None):
+        return target_series if ticker == "NVDA" else comp_series
+
+    with patch("agents.market_agent.load_config", return_value=config or FAKE_CONFIG), \
+         patch("agents.market_agent.get_annual_series", side_effect=series):
+        return _MarketAgent("NVDA").run("Compare competitors")
+
+
+def test_no_overlapping_calendar_years_warns_and_skips_revenue_ratio():
+    result = _run_market(
+        {"2016-01-31": 5e9, "2026-01-25": 216e9},
+        {"2018-12-31": 4e9, "2020-12-31": 34e9},
+    )
+
+    assert any(
+        "No overlapping calendar years found between NVDA and TCOMP" in w
+        for w in result.warnings
+    )
+    assert not any("x TCOMP's" in f.claim for f in result.findings)
+    assert result.metrics["competitors_compared"] == 1
+
+
+def test_overlapping_year_produces_revenue_ratio_finding_for_latest_common_year():
+    result = _run_market(
+        {"2016-01-31": 5e9, "2026-01-25": 216e9},
+        {"2016-12-31": 4e9, "2026-12-31": 54e9},
+    )
+
+    f = next(x for x in result.findings if x.source_chunk_id == "NVDA_vs_TCOMP_revenue_2026")
+    assert "calendar 2026" in f.claim
+    assert "4.0x TCOMP's" in f.claim  # 216e9 / 54e9
+    assert f.source_form == "XBRL_metrics"
+    assert f.source_filing_date == "2026"
+    assert f.confidence == 1.0
+    assert not any("No overlapping" in w for w in result.warnings)
+
+
+def test_zero_competitor_revenue_suppresses_ratio_finding_without_warning():
+    result = _run_market(
+        {"2016-01-31": 5e9, "2026-01-25": 216e9},
+        {"2016-12-31": 4e9, "2026-12-31": 0.0},
+    )
+
+    assert not any(x.source_chunk_id.endswith("_revenue_2026") for x in result.findings)
+    assert not any("No overlapping" in w for w in result.warnings)
+
+
+def test_cagr_comparison_says_slower_when_target_grows_less():
+    result = _run_market(
+        {"2016-01-31": 100e9, "2026-01-25": 120e9},
+        {"2016-12-31": 4e9, "2026-12-31": 34e9},
+    )
+
+    cagr = next(f for f in result.findings if "CAGR" in f.claim)
+    assert "slower" in cagr.claim
