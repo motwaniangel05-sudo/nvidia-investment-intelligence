@@ -91,3 +91,12 @@ def test_market_agent_target_missing_data_warns():
         result = agent.run("Compare competitors")
 
     assert any("No revenue data available for target company NVDA" in w for w in result.warnings)
+
+
+
+# ---- retrieve is unused ----
+from agents.market_agent import MarketAgent as _MarketAgent
+
+
+def test_retrieve_is_unused_and_returns_empty_list():
+    assert _MarketAgent("NVDA").retrieve("anything") == []

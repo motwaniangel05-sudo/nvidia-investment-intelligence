@@ -133,3 +133,30 @@ def test_metrics_does_not_require_document_fk(tmp_path):
     )
     conn.commit()
     conn.close()
+
+
+
+# ---- get_db_path ----
+from unittest.mock import patch as _patch
+
+from core import schemas as _schemas
+
+
+def test_get_db_path_uses_the_config_it_is_given():
+    cfg = {"paths": {"knowledge_db": "x.db"}}
+    with _patch.object(_schemas, "get_path", return_value="db-path") as mock_get, \
+         _patch.object(_schemas, "load_config") as mock_load:
+        assert _schemas.get_db_path(cfg) == "db-path"
+
+    mock_get.assert_called_once_with(cfg, "knowledge_db")
+    mock_load.assert_not_called()
+
+
+def test_get_db_path_loads_config_when_none_given():
+    loaded = {"loaded": True}
+    with _patch.object(_schemas, "get_path", return_value="db-path") as mock_get, \
+         _patch.object(_schemas, "load_config", return_value=loaded) as mock_load:
+        assert _schemas.get_db_path() == "db-path"
+
+    mock_load.assert_called_once_with()
+    mock_get.assert_called_once_with(loaded, "knowledge_db")
