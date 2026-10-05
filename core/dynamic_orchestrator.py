@@ -9,6 +9,8 @@ change their interface.
 
 import argparse
 import json
+import logging
+import sys
 import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
@@ -23,6 +25,7 @@ from agents.synthesis_agent import synthesize
 from agents.valuation_agent import ValuationAgent
 from core.agent_planner import plan_query
 from core.logger import get_logger
+from core.result_adapters import normalize_result, normalize_synthesis, normalize_verification
 from core.schemas import AgentResult
 from core.task_schema import (
     FINANCIAL, MARKET, NEWS, RED_TEAM, RESEARCH, RISK, VALUATION,
@@ -86,21 +89,22 @@ def _run_agent(adapter: AgentAdapter, context: AgentContext) -> Tuple[AgentResul
     return result, AgentRun(adapter.key, name, result.status, round(duration, 3), error)
 
 
-def _run_red_team(agent_results: Dict[str, AgentResult], runs: List[AgentRun],
-                  verifier: Callable = None) -> list:
+def _run_red_team(response: DynamicResponse, verifier: Callable = None) -> None:
     verifier = verifier or run_verification
     log.info("[AGENT] %s started (verify agent findings)", RED_TEAM_NAME)
     start = time.perf_counter()
     try:
-        verification = verifier(agent_results)
+        verification = verifier(response.agent_results)
     except Exception as e:
         log.error("[AGENT] %s error: %s", RED_TEAM_NAME, e)
-        runs.append(AgentRun(RED_TEAM, RED_TEAM_NAME, "failed", round(time.perf_counter() - start, 3), str(e)))
-        return []
+        response.runs.append(AgentRun(RED_TEAM, RED_TEAM_NAME, "failed", round(time.perf_counter() - start, 3), str(e)))
+        response.standard_results[RED_TEAM_NAME] = normalize_verification(None, error=str(e))
+        return
     duration = time.perf_counter() - start
     log.info("[AGENT] %s completed (issues=%d, %.2fs)", RED_TEAM_NAME, len(verification), duration)
-    runs.append(AgentRun(RED_TEAM, RED_TEAM_NAME, "success", round(duration, 3)))
-    return verification
+    response.runs.append(AgentRun(RED_TEAM, RED_TEAM_NAME, "success", round(duration, 3)))
+    response.verification = verification
+    response.standard_results[RED_TEAM_NAME] = normalize_verification(verification)
 
 
 def execute_plan(plan: ExecutionPlan, registry: Optional[Dict[str, AgentAdapter]] = None,
@@ -126,14 +130,16 @@ def execute_plan(plan: ExecutionPlan, registry: Optional[Dict[str, AgentAdapter]
         )
         result, run = _run_agent(adapter, context)
         response.agent_results[adapter.agent_name] = result
+        response.standard_results[adapter.agent_name] = normalize_result(result)
         response.runs.append(run)
 
     if RED_TEAM in plan.agents and response.agent_results:
-        response.verification = _run_red_team(response.agent_results, response.runs)
+        _run_red_team(response)
 
     if synthesize_report:
         log.info("[AGENT] %s started", SYNTHESIS_NAME)
         response.synthesis = synthesize(response.to_legacy_dict())
+        response.standard_results[SYNTHESIS_NAME] = normalize_synthesis(response.synthesis)
         log.info("[AGENT] %s completed (status=%s)", SYNTHESIS_NAME, response.synthesis.overall_status)
 
     return response
@@ -172,14 +178,24 @@ def format_response(response: DynamicResponse) -> str:
     return "\n".join(lines)
 
 
+def _logs_to_stderr() -> None:
+    """Keep stdout clean for --json: the project logger writes to stdout."""
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging.StreamHandler) and getattr(handler, "stream", None) is sys.stdout:
+            handler.setStream(sys.stderr)
+
+
 def main(argv: Optional[List[str]] = None, registry: Optional[Dict[str, AgentAdapter]] = None) -> int:
     parser = argparse.ArgumentParser(description="Ask a question; agents are selected automatically.")
     parser.add_argument("query", nargs="+", help="natural-language question")
     parser.add_argument("--ticker", help="override the company ticker")
     parser.add_argument("--plan-only", action="store_true", help="print the plan as JSON and exit")
     parser.add_argument("--no-verify", action="store_true", help="skip Red-Team verification")
+    parser.add_argument("--json", action="store_true", help="print plan + standard agent results as JSON")
     args = parser.parse_args(argv)
     query = " ".join(args.query)
+    if args.json or args.plan_only:
+        _logs_to_stderr()
 
     if args.plan_only:
         plan = plan_query(query, include_verification=not args.no_verify)
@@ -192,7 +208,7 @@ def main(argv: Optional[List[str]] = None, registry: Optional[Dict[str, AgentAda
         query, company_ticker=args.ticker,
         run_verification_step=not args.no_verify, registry=registry,
     )
-    print(format_response(response))
+    print(response.to_json(indent=2) if args.json else format_response(response))
     return 0
 
 

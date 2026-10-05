@@ -3,12 +3,14 @@ import logging
 
 import pytest
 
+from agents.red_team_agent import VerificationResult
 from core import dynamic_orchestrator as dyn
 from core.config_loader import load_config
 from core.schemas import AgentResult, Finding
 from core.task_schema import ExecutionPlan, AgentTask
 
 CONFIG = load_config()
+ISSUE = VerificationResult("claim", "evidence", "FLAGGED", 0.5, "problem", "fix", "FinancialAgent")
 
 
 class FakeAgent:
@@ -51,7 +53,7 @@ def _boom(self, company_ticker):
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch):
     FakeAgent.calls = []
-    monkeypatch.setattr(dyn, "run_verification", lambda results: ["issue"] * len(results))
+    monkeypatch.setattr(dyn, "run_verification", lambda results: [ISSUE] * len(results))
 
 
 def _ran(response):
@@ -62,7 +64,7 @@ def test_financial_health_question_runs_only_selected_agents():
     r = dyn.run_dynamic_query("How financially healthy is NVIDIA?", config=CONFIG, registry=_registry())
     assert _ran(r) == ["ResearchAgent", "FinancialAgent", "RiskAgent", "RedTeamAgent"]
     assert set(r.agent_results) == {"ResearchAgent", "FinancialAgent", "RiskAgent"}
-    assert r.verification == ["issue"] * 3
+    assert r.verification == [ISSUE] * 3
 
 
 def test_buy_sell_question():
@@ -201,6 +203,47 @@ def test_cli_plan_only(capsys):
     assert out["intent"] == "competitor"
     assert out["company_ticker"] == "AMD"
     assert out["agents"][-1] == "red_team"
+
+
+def test_standard_results_for_every_agent_that_ran():
+    r = dyn.run_dynamic_query("Is NVIDIA overvalued?", config=CONFIG, registry=_registry(failing="market"),
+                              synthesize_report=True)
+    assert list(r.standard_results) == ["FinancialAgent", "MarketAgent", "ValuationAgent",
+                                        "RedTeamAgent", "SynthesisAgent"]
+    assert r.standard_results["MarketAgent"].status == "failed"
+    doc = json.loads(r.to_json())
+    assert doc["plan"]["intent"] == "valuation"
+    assert doc["agent_count"] == 5
+    assert [x["agent_name"] for x in doc["results"]][-1] == "SynthesisAgent"
+
+
+def test_red_team_failure_has_failed_standard_result(monkeypatch):
+    def broken(_):
+        raise ValueError("verifier down")
+    monkeypatch.setattr(dyn, "run_verification", broken)
+    r = dyn.run_dynamic_query("Is NVIDIA overvalued?", config=CONFIG, registry=_registry())
+    red = r.standard_results["RedTeamAgent"]
+    assert red.status == "failed" and red.errors == ["verifier down"]
+
+
+def test_cli_json(capsys, monkeypatch):
+    monkeypatch.setattr(dyn, "run_verification", lambda results: [])
+    assert dyn.main(["--json", "Is", "NVIDIA", "overvalued?"], registry=_registry()) == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["plan"]["agents"] == ["financial", "market", "valuation", "red_team"]
+    assert doc["results"][-1]["agent_name"] == "RedTeamAgent"
+
+
+def test_json_mode_moves_stdout_logging_to_stderr(monkeypatch):
+    import sys
+    handler = logging.StreamHandler(sys.stdout)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        dyn._logs_to_stderr()
+        assert handler.stream is sys.stderr
+    finally:
+        root.removeHandler(handler)
 
 
 def test_cli_run(capsys):

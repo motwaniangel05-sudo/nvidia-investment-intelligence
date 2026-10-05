@@ -7,10 +7,12 @@ Everything here is plain data (dataclasses), so plans are inspectable,
 serializable with to_dict(), and testable without running any agent.
 """
 
+import json
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from core import agent_result as standard
 from core.schemas import AgentResult
 
 
@@ -127,6 +129,15 @@ class DynamicResponse:
     verification: list = field(default_factory=list)
     runs: List[AgentRun] = field(default_factory=list)
     synthesis: Any = None
+    # Standard contract (core.agent_result.AgentResult) per agent, incl. Red-Team/Synthesis.
+    standard_results: Dict[str, "standard.AgentResult"] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Plan plus standard results; this is what the Qwen layer will consume."""
+        return {"plan": self.plan.to_dict(), **standard.results_to_dict(self.standard_results.values())}
+
+    def to_json(self, indent: Optional[int] = None) -> str:
+        return json.dumps(self.to_dict(), indent=indent, allow_nan=False)
 
     def to_legacy_dict(self) -> Dict[str, Any]:
         """Same shape as core.orchestrator.run_query(), so existing consumers
