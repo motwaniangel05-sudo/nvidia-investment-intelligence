@@ -131,10 +131,13 @@ class DynamicResponse:
     synthesis: Any = None
     # Standard contract (core.agent_result.AgentResult) per agent, incl. Red-Team/Synthesis.
     standard_results: Dict[str, "standard.AgentResult"] = field(default_factory=dict)
+    evidence_context: Any = None  # core.evidence_aggregator.EvidenceContext
 
     def to_dict(self) -> Dict[str, Any]:
         """Plan plus standard results; this is what the Qwen layer will consume."""
-        return {"plan": self.plan.to_dict(), **standard.results_to_dict(self.standard_results.values())}
+        context = self.evidence_context.to_dict() if self.evidence_context is not None else None
+        return {"plan": self.plan.to_dict(), **standard.results_to_dict(self.standard_results.values()),
+                "evidence_context": context}
 
     def to_json(self, indent: Optional[int] = None) -> str:
         return json.dumps(self.to_dict(), indent=indent, allow_nan=False)

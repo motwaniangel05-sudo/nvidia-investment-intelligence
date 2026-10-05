@@ -24,6 +24,7 @@ from agents.risk_agent import RiskAgent
 from agents.synthesis_agent import synthesize
 from agents.valuation_agent import ValuationAgent
 from core.agent_planner import plan_query
+from core.evidence_aggregator import aggregate_evidence
 from core.logger import get_logger
 from core.result_adapters import normalize_result, normalize_synthesis, normalize_verification
 from core.schemas import AgentResult
@@ -142,6 +143,14 @@ def execute_plan(plan: ExecutionPlan, registry: Optional[Dict[str, AgentAdapter]
         response.standard_results[SYNTHESIS_NAME] = normalize_synthesis(response.synthesis)
         log.info("[AGENT] %s completed (status=%s)", SYNTHESIS_NAME, response.synthesis.overall_status)
 
+    try:
+        response.evidence_context = aggregate_evidence(
+            plan.query, response.standard_results.values(), intent=plan.intent,
+            company_ticker=plan.company_ticker,
+            user_prices=plan.analysis.user_prices if plan.analysis else None)
+    except Exception as e:  # aggregation must never break the agent run
+        log.error("[AGGREGATOR] failed: %s", e)
+
     return response
 
 
@@ -192,9 +201,10 @@ def main(argv: Optional[List[str]] = None, registry: Optional[Dict[str, AgentAda
     parser.add_argument("--plan-only", action="store_true", help="print the plan as JSON and exit")
     parser.add_argument("--no-verify", action="store_true", help="skip Red-Team verification")
     parser.add_argument("--json", action="store_true", help="print plan + standard agent results as JSON")
+    parser.add_argument("--context", action="store_true", help="print only the compact evidence context for Qwen")
     args = parser.parse_args(argv)
     query = " ".join(args.query)
-    if args.json or args.plan_only:
+    if args.json or args.plan_only or args.context:
         _logs_to_stderr()
 
     if args.plan_only:
@@ -208,7 +218,10 @@ def main(argv: Optional[List[str]] = None, registry: Optional[Dict[str, AgentAda
         query, company_ticker=args.ticker,
         run_verification_step=not args.no_verify, registry=registry,
     )
-    print(response.to_json(indent=2) if args.json else format_response(response))
+    if args.context:
+        print(response.evidence_context.to_json(indent=2) if response.evidence_context else "{}")
+    else:
+        print(response.to_json(indent=2) if args.json else format_response(response))
     return 0
 
 
