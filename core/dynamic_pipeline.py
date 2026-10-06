@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 
 from core import dynamic_orchestrator as do
 from core.qwen_synthesizer import synthesize as qwen_synthesize
+from core.position_calc import calculate_position
 
 AGENT_TIMEOUT = 180  # seconds to wait for all agents
 
@@ -82,6 +83,13 @@ def run(query, company_ticker=None, timeout=AGENT_TIMEOUT, registry=None,
     except Exception as exc:
         errors.append(f"aggregator: {exc}")
     context_dict = context.to_dict() if context is not None else {"query": query}
+    try:
+        prices = plan.analysis.user_prices if plan.analysis else None
+        position = calculate_position(prices)
+        if position:
+            context_dict["position_calculations"] = position
+    except Exception as exc:
+        errors.append(f"position calculator: {exc}")
 
     t1 = time.time()
     try:
