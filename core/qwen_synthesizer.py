@@ -52,7 +52,7 @@ def call_ollama(messages, model=MODEL, base_url=OLLAMA_URL, timeout=600):
         "stream": False,
         "think": False,
         "format": ANSWER_SCHEMA,
-        "options": {"temperature": 0, "num_ctx": 4096, "num_predict": 1000},
+        "options": {"temperature": 0, "num_ctx": 8192, "num_predict": 1000},
     }
     resp = requests.post(f"{base_url}/api/chat", json=payload, timeout=timeout)
     resp.raise_for_status()
