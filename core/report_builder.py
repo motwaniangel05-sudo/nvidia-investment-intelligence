@@ -10,39 +10,6 @@ import requests
 
 from core.qwen_synthesizer import MODEL, OLLAMA_URL, parse_json, unsupported_numbers
 
-_LIST = {"type": "array", "items": {"type": "string"}}
-PARTS_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "executive_conclusion": {"type": "string"},
-        "bull_case": _LIST,
-        "bear_case": _LIST,
-        "final_assessment": {"type": "string"},
-    },
-    "required": ["executive_conclusion", "bull_case", "bear_case", "final_assessment"],
-}
-
-PARTS_PROMPT = (
-    "You write the judgement parts of an investment report. "
-    "Use ONLY the FACTS and the question. Never write a number that is not in FACTS. "
-    "Do no maths: copy CALCULATED numbers exactly. "
-    "USER-PROVIDED numbers are not verified market data. "
-    "A current price above the user's cost is a GAIN. "
-    "Do NOT tell the user to buy or sell: describe considerations and scenarios. "
-    "If FACTS has a CONFLICT, mention it. "
-    "If a VALUATION line says BELOW the market-implied value, the market price is above that model value: never call the stock undervalued because of it. "
-    "Never claim fraud, manipulation or anything that is not written in FACTS. "
-    "Never write consider selling or consider buying: say what the data shows and what it cannot show. "
-    "Valuation models are assumption-based and low quality: say the models suggest, never say the stock is overvalued or undervalued. "
-    "P/E and market-implied value use the stored price, not the user price: say so if you use them. "
-    "A DCF scenario BELOW the market-implied value does not support higher prices. "
-    "The daily move comes from user-typed prices and is unverified: do not call it momentum or a signal. "
-    "FACTS has no valuation data: do not discuss valuation, or say the stock is cheap, expensive, undervalued or overvalued. "
-    "executive_conclusion: max 2 short sentences. bull_case: max 3 short items. "
-    "bear_case: max 3 short items. final_assessment: max 3 short sentences about "
-    "the main uncertainty. Plain text only, no markdown. Reply with JSON only."
-)
-
 DISCLAIMER = ("This is an educational analysis built only from the evidence above. "
               "It is not financial advice.")
 
@@ -182,92 +149,10 @@ def _source_lines(ctx):
     return lines or ["No sources recorded."]
 
 
-def facts_for_qwen(ctx, runs):
-    """Short facts list for Qwen (kept small for a 2B model)."""
-    lines = []
-    pos = ctx.get("position_calculations")
-    if pos:
-        lines.append("USER-PROVIDED (not verified): "
-                     + ", ".join(f"{k} = {v}" for k, v in pos["inputs"].items()))
-        for c in pos["calculations"]:
-            lines.append(f"CALCULATED: {c['metric']} = {c['value']} {c['unit']}".rstrip())
-        for flag in pos.get("flags") or []:
-            lines.append("FLAG: " + flag)
-    for m in ctx.get("market_findings") or []:
-        lines.append(f"STORED DATA: {m.get('metric')} = {m.get('value')} {m.get('unit', '')} "
-                     f"on {m.get('date', 'n/a')}")
-    for c in ctx.get("conflicts") or []:
-        lines.append("CONFLICT: " + _conflict_text(c))
-    for m in ctx.get("financial_metrics") or []:
-        latest = _latest(m.get("values"), 1)
-        if latest:
-            lines.append(f"FINANCIAL: {m.get('metric')} latest ({latest[0][0]}) = "
-                         f"{latest[0][1]} {m.get('unit', '')}")
-    for r in ctx.get("risks") or []:
-        lines.append(f"RISK: {r.get('risk')} severity {r.get('severity')}")
-    for r in _failed(runs):
-        lines.append(f"AGENT FAILED: {r.get('agent')}")
-    return "\n".join(lines)
-
-
-def ask_qwen(query, facts, model=MODEL, base_url=OLLAMA_URL, timeout=600):
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": PARTS_PROMPT},
-            {"role": "user", "content": f"QUESTION: {query}\n\nFACTS:\n{facts}"},
-        ],
-        "stream": False,
-        "think": False,
-        "format": PARTS_SCHEMA,
-        "options": {"temperature": 0, "num_ctx": 8192, "num_predict": 700},
-    }
-    resp = requests.post(f"{base_url}/api/chat", json=payload, timeout=timeout)
-    resp.raise_for_status()
-    data = parse_json(resp.json()["message"]["content"])
-    if not isinstance(data, dict):
-        raise ValueError("Qwen did not return valid JSON")
-    return data
-
-
 BANNED = re.compile(
     r"undervalu|overvalu|momentum|manipulat|buy signal|sell signal|lock in|"
     r"should (buy|sell)|consider (selling|buying)|selling could|buying exposes|"
     r"priced lower|cheap|expensive", re.I)
-
-
-def _guard(raw, allowed_text):
-    """Remove any sentence with a number that is not in the evidence."""
-    bad = set()
-
-    def clean(text):
-        sentences = re.split(r"(?<=[.!?])\s+", " ".join(str(text or "").split()))
-        keep = []
-        for s in sentences:
-            found = unsupported_numbers(s, allowed_text)
-            if found:
-                bad.update(found)
-            elif BANNED.search(s):
-                continue
-            else:
-                keep.append(s)
-        return " ".join(keep).strip()
-
-    def clean_list(items):
-        items = items if isinstance(items, list) else [items]
-        return [x for x in (clean(i) for i in items) if x][:3]
-
-    parts = {
-        "executive_conclusion": clean(raw.get("executive_conclusion")),
-        "bull_case": clean_list(raw.get("bull_case")),
-        "bear_case": clean_list(raw.get("bear_case")),
-        "final_assessment": clean(raw.get("final_assessment")),
-    }
-    removed_note = "Removed because it used numbers that are not in the evidence."
-    for key in ("executive_conclusion", "final_assessment"):
-        if not parts[key]:
-            parts[key] = removed_note
-    return parts, sorted(bad)
 
 
 def compute_confidence(ctx, runs, qwen_ok, removed):
