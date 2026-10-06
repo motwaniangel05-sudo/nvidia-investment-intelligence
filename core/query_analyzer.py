@@ -3,7 +3,7 @@ Query Analyzer: turns a natural-language question into a structured
 QueryAnalysis (intents, tickers, user-supplied prices).
 
 Rule-based and transparent: every detected intent lists the exact terms that
-triggered it (QueryAnalysis.matched_terms). No LLM is used here yet.
+triggered it (QueryAnalysis.matched_terms). No LLM is used here.
 """
 
 import re

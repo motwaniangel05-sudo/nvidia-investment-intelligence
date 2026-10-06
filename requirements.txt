@@ -3,7 +3,7 @@ numpy>=1.26
 pandas>=2.2
 scipy>=1.11
 
-# ML / NLP (classical, no LLMs)
+# ML / NLP (classical models; the optional local Qwen runs separately through Ollama, no cloud APIs)
 scikit-learn>=1.4
 
 # Configuration and validation
