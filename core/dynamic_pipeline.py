@@ -109,6 +109,7 @@ def run(query, company_ticker=None, timeout=AGENT_TIMEOUT, registry=None,
         "verification": context_dict.get("verification_flags") or context_dict.get("conflicts"),
         "final_response": final,
         "sources": context_dict.get("sources", []),
+        "context": context_dict,
         "errors": errors,
         "metadata": {
             "total_seconds": round(time.time() - started, 2),
