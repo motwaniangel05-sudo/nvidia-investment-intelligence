@@ -69,18 +69,23 @@ def _data_lines(ctx):
     if pos:
         lines.append("**USER-PROVIDED (not verified market data):** "
                      + ", ".join(f"{k} = {v}" for k, v in pos["inputs"].items()))
+        lines.append("")
         lines.append("**CALCULATED BY CODE from your numbers:**")
+        lines.append("")
         for c in pos["calculations"]:
             lines.append(f"- {c['metric'].replace('_', ' ')}: {c['value']} {c['unit']}".rstrip())
         for flag in pos.get("flags") or []:
             lines.append(f"- WARNING: {flag}")
     stored = ctx.get("market_findings") or []
     if stored:
+        lines.append("")
         lines.append("**STORED MARKET DATA:**")
+        lines.append("")
         for m in stored:
             lines.append(f"- {m.get('metric')}: {m.get('value')} {m.get('unit', '')} "
                          f"(date {m.get('date', 'n/a')}, source quality {m.get('quality')})")
     for c in ctx.get("conflicts") or []:
+        lines.append("")
         lines.append("**CONFLICT (not resolved):** " + _conflict_text(c)
                      + " | " + str(c.get("note", ""))[:200])
     return lines or ["No data available."]
@@ -147,6 +152,9 @@ def _risk_lines(ctx):
 def _news_lines(ctx):
     lines = [f"- [{n.get('date', 'n/a')}] ({n.get('label')}) {str(n.get('text', ''))[:220]}"
              for n in ctx.get("news_events") or []]
+    if lines:
+        lines.append("")
+        lines.append("_Matched to your question by keywords, so some items may not be relevant. The stored 8-K data has no earnings press releases._")
     return lines or ["No recent events available."]
 
 

@@ -55,8 +55,17 @@ def _execute_parallel(plan, registry, timeout):
     return response
 
 
+def _notify(progress, stage, info):
+    """Report REAL progress to a caller (for example the chat page)."""
+    if progress:
+        try:
+            progress(stage, info)
+        except Exception:
+            pass
+
+
 def run(query, company_ticker=None, timeout=AGENT_TIMEOUT, registry=None,
-        synthesizer=qwen_synthesize, config=None):
+        synthesizer=qwen_synthesize, config=None, progress=None):
     """answer = run(user_query) -> dict with the final answer and everything behind it."""
     started = time.time()
     errors = []
@@ -66,9 +75,11 @@ def run(query, company_ticker=None, timeout=AGENT_TIMEOUT, registry=None,
     if company_ticker:
         plan.company_ticker = company_ticker.strip().upper()
 
+    _notify(progress, "plan", {"agents": plan.agents, "intent": plan.intent})
     t0 = time.time()
     response = _execute_parallel(plan, registry, timeout)
     agents_seconds = round(time.time() - t0, 2)
+    _notify(progress, "agents", [vars(r) for r in response.runs])
     for r in response.runs:
         if r.status == "failed":
             errors.append(f"{r.agent}: {r.error}")
@@ -91,6 +102,8 @@ def run(query, company_ticker=None, timeout=AGENT_TIMEOUT, registry=None,
     except Exception as exc:
         errors.append(f"position calculator: {exc}")
 
+    _notify(progress, "evidence", {"sources": len(context_dict.get("sources") or []),
+                                   "conflicts": len(context_dict.get("conflicts") or [])})
     t1 = time.time()
     try:
         final = synthesizer(query, context_dict)
