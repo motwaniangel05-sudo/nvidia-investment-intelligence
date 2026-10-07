@@ -54,7 +54,7 @@ evidence aggregator -> position calculator (user-typed prices) -> report builder
 - Qwen can take up to a minute on an 8 GB laptop. If Ollama is not running, the report still works
   without the summary.
 - The Research and Risk agents search NVIDIA's filings for any ticker, so a question about another company returns NVIDIA evidence. A ticker filter is not implemented yet.
-- The Qwen summary is not tailored to the question. It mostly repeats the headline financial numbers and can use a number with the wrong meaning. Trust the code-written sections.
+- The Qwen summary is chosen by question type, but a 2B model can still misread numbers (it once described revenue ratios as market share). It is labelled as possibly wrong. Trust the code-written sections.
 - This is an educational project. It is not financial advice.
 
 ## Rebuilding the data (needed after a fresh clone)

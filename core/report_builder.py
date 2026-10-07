@@ -152,7 +152,7 @@ def _source_lines(ctx):
 BANNED = re.compile(
     r"undervalu|overvalu|momentum|manipulat|buy signal|sell signal|lock in|"
     r"should (buy|sell)|consider (selling|buying)|selling could|buying exposes|"
-    r"priced lower|cheap|expensive", re.I)
+    r"priced lower|cheap|expensive|market share|-to-(one|two|three|four|five)|twice|double|triple", re.I)
 
 
 def compute_confidence(ctx, runs, qwen_ok, removed):
@@ -219,8 +219,8 @@ PLAIN_SCHEMA = {
     "required": ["summary"],
 }
 PLAIN_PROMPT = (
-    "Rewrite the POINTS below as a plain-language summary of at most 3 short sentences. "
-    "Add nothing: no new facts, numbers, opinions, predictions or advice. "
+    "Using ONLY the POINTS below the QUESTION, write a plain-language summary that helps with the question, in at most 3 short sentences. If the points do not answer it, say what they do show. "
+    "Add nothing: no new facts, numbers, opinions, predictions or advice. Copy numbers exactly as written: never turn them into words or ratios. "
     "Do not say buy, sell, cheap, expensive, undervalued or overvalued. "
     "Plain text only, no markdown. Reply with JSON only."
 )
@@ -312,6 +312,39 @@ def _assessment(ctx, runs):
     return text
 
 
+def _focus_points(ctx):
+    """Choose the points Qwen gets, based on the type of question."""
+    intent = (ctx.get("intent") or "").lower()
+    pts = []
+    if intent == "risk":
+        for r in ctx.get("risks") or []:
+            pts.append(f"Risk category {r.get('risk')}: severity {r.get('severity')} "
+                       "(counts how many filing years mention it, not impact).")
+    elif intent == "valuation":
+        vp = _valuation_point(ctx)
+        if vp:
+            pts.append(vp)
+            pts.append("DCF results depend on fixed assumptions.")
+        for v in ctx.get("valuation") or []:
+            if v.get("multiple") is not None:
+                pts.append(f"{v.get('method')}: {v['multiple']}x, based on the stored share price.")
+    elif intent in ("competitor", "market"):
+        for m in ctx.get("competitor_findings") or []:
+            if m.get("metric"):
+                pts.append(f"{m['metric']}: {m.get('value')} {m.get('unit', '')} "
+                           f"({m.get('period', 'n/a')}).")
+    elif intent == "news":
+        for n in ctx.get("news_events") or []:
+            pts.append(f"[{n.get('date', 'n/a')}] {str(n.get('text', ''))[:160]}")
+        if pts:
+            pts.append("These news items were matched by keywords and may not be relevant.")
+    elif intent in ("financial", "research"):
+        pts = _bull_points(ctx)
+    else:
+        pts = _bull_points(ctx) + _bear_points(ctx)
+    return pts or (_bull_points(ctx) + _bear_points(ctx))
+
+
 def build_report(query, ctx, runs=None, errors=None, ask=ask_summary):
     runs = runs or []
     bull, bear = _bull_points(ctx), _bear_points(ctx)
@@ -319,10 +352,10 @@ def build_report(query, ctx, runs=None, errors=None, ask=ask_summary):
     exec_text = ((ps + " ") if ps else "") + (
         "This report lists the evidence found; it does not decide whether to buy or sell.")
 
-    points = bull + bear
+    points = _focus_points(ctx)
     summary, removed, qwen_ok = "", [], True
     if points:
-        points_text = "\n".join("- " + p for p in points)
+        points_text = "QUESTION: " + query + "\n" + "\n".join("- " + p for p in points)
         try:
             raw = ask(points_text)
             summary, removed = _clean_summary(raw, points_text + " " + query)
