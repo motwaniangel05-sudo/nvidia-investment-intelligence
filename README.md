@@ -73,3 +73,17 @@ about 70 MB of space, so it can take several minutes):
     python -m rag.vector_store                       # builds the search index
 
 Run `python3 scripts/check_data.py` again at the end. All four lines should say OK.
+
+## Screenshots
+
+Home page: ask any question, and the system chooses the agents it needs.
+
+![Home page](docs/images/home.png)
+
+Results: the agents that ran, with their real status and timing.
+
+![Results](docs/images/results.png)
+
+The report separates your typed numbers (unverified), numbers calculated by code, stored data, and conflicts.
+
+![Report](docs/images/report.png)
