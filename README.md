@@ -56,3 +56,20 @@ evidence aggregator -> position calculator (user-typed prices) -> report builder
 - The Research and Risk agents search NVIDIA's filings for any ticker, so a question about another company returns NVIDIA evidence. A ticker filter is not implemented yet.
 - The Qwen summary is not tailored to the question. It mostly repeats the headline financial numbers and can use a number with the wrong meaning. Trust the code-written sections.
 - This is an educational project. It is not financial advice.
+
+## Rebuilding the data (needed after a fresh clone)
+
+Large data files are not stored on GitHub. Without them, the Risk and Research agents fail or
+return nothing. Use Python 3.11 or newer (3.13 is what the tests use). To see what is missing:
+
+    python3 scripts/check_data.py
+
+Then run these commands, in this order (the filing download needs an internet connection and
+about 70 MB of space, so it can take several minutes):
+
+    python -m data_acquisition.document_downloader   # downloads the 10-K / 10-Q filings
+    python -m rag.chunker                            # cuts the filings into text chunks
+    python -m core.memory                            # builds the knowledge database
+    python -m rag.vector_store                       # builds the search index
+
+Run `python3 scripts/check_data.py` again at the end. All four lines should say OK.
