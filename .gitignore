@@ -58,3 +58,4 @@ models/embeddings/tfidf_store.pkl
 # not regenerable, must be tracked regardless of other data/processed/ rules
 !data/processed/labeling_template.csv
 .coverage
+outputs/validation_report.md
