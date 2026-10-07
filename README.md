@@ -53,4 +53,6 @@ evidence aggregator -> position calculator (user-typed prices) -> report builder
 - Free cash flow cannot be computed because CapEx is missing in the XBRL data.
 - Qwen can take up to a minute on an 8 GB laptop. If Ollama is not running, the report still works
   without the summary.
+- The Research and Risk agents search NVIDIA's filings for any ticker, so a question about another company returns NVIDIA evidence. A ticker filter is not implemented yet.
+- The Qwen summary is not tailored to the question. It mostly repeats the headline financial numbers and can use a number with the wrong meaning. Trust the code-written sections.
 - This is an educational project. It is not financial advice.
